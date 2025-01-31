@@ -130,7 +130,6 @@
                 <div class="progress-filled"></div>
             </div>
             <div class="volume-container">
-                <button class="button" id="muteBtn">Mute</button>
                 <input type="range" class="volume-slider" min="0" max="1" step="0.1" value="1">
             </div>
             <button class="button" id="fullscreenBtn">Fullscreen</button>
@@ -205,21 +204,18 @@
         preloadVideo.style.display = 'none';
         document.body.appendChild(preloadVideo);
 
-        function getVideoUrl(cid, retry = false) {
+        function getVideoUrl(cid) {
             const providers = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
-    
-        // If retry is true, reverse the providers array
-            if (retry) providers.reverse();
     
         // Select a random provider from the array
             const randomProvider = providers[Math.floor(Math.random() * providers.length)];
     
-        // If the provider is 'dweb.link' or 'flk-ipfs.xyz', use the new URL format
+        // If the provider is 'dweb.link' or 'flk-ipfs.xyz', use the subdomain URL format
             if (randomProvider === 'dweb.link' || randomProvider === 'flk-ipfs.xyz') {
                 return `https://${cid}.ipfs.${randomProvider}`;
         }
     
-    // Otherwise, use the original URL structure
+        // Otherwise, use the original URL structure
         return `https://ipfs.${randomProvider}/ipfs/${cid}`;
         }
 
@@ -252,7 +248,7 @@
                     });
                 };
 
-                while (retryCount < 2) {
+                while (retryCount < 5) {
                     try {
                         await loadVideo(currentUrl);
                         break;
@@ -262,7 +258,7 @@
                     }
                 }
 
-                if (retryCount >= 2) throw new Error('Both providers failed');
+                if (retryCount >= 5) throw new Error('all providers failed');
 
                 try {
                     if (!autoplayAttempted) {
@@ -298,10 +294,6 @@
         });
 
         document.getElementById('nextBtn').addEventListener('click', loadNextVideo);
-        document.getElementById('muteBtn').addEventListener('click', () => {
-            video.muted = !video.muted;
-            document.getElementById('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
-        });
 
         document.querySelector('.volume-slider').addEventListener('input', (e) => {
             video.volume = e.target.value;
@@ -313,6 +305,21 @@
             } else {
                 document.exitFullscreen();
             }
+        });
+
+        // Update progress bar as the video plays
+        video.addEventListener('timeupdate', () => {
+            const percentage = (video.currentTime / video.duration) * 100;
+            document.querySelector('.progress-filled').style.width = percentage + '%';
+        });
+
+        // Seek video when clicking on the progress bar
+        document.querySelector('.progress').addEventListener('click', (e) => {
+            const progressBar = e.currentTarget;
+            const rect = progressBar.getBoundingClientRect(); // Get dimensions & position
+            const clickPos = e.clientX - rect.left; // X coordinate of click relative to the progress bar
+            const clickPercentage = clickPos / rect.width; // Ratio of click position to total width
+            video.currentTime = video.duration * clickPercentage; // Update the video time based on click
         });
 
         let clickCount = 0;
