@@ -3,26 +3,38 @@
 <head>
     <title>dtube</title>
     <style>
-        body {
+        html, body {
             margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: auto; /* Ensure scrollbars appear when needed */
+        }
+
+        body {
             background: #000;
             color: white;
             font-family: Arial, sans-serif;
             height: 100%;
             display: flex;
             flex-direction: column;
+            justify-content: center;
+            align-items: center;
         }
 
         #videoContainer {
             flex-grow: 1;
             position: relative;
             background: black;
+            width: 100%;
+            height: 100%;
+            overflow: auto; /* Allow scrolling within the video container */
         }
 
         #videoPlayer {
             width: 100%;
             height: 100%;
             object-fit: contain;
+            display: block;
         }
 
         .controls {
@@ -34,6 +46,7 @@
             display: flex;
             align-items: center;
             box-sizing: border-box;
+            z-index: 2;
         }
 
         .button {
@@ -43,6 +56,21 @@
             cursor: pointer;
             padding: 8px;
             font-size: 20px;
+        }
+
+        .big-play-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            padding: 20px 40px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 10px;
         }
 
         .progress {
@@ -58,16 +86,6 @@
             height: 100%;
             background: #ff0000;
             width: 0%;
-        }
-
-        .progress::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.3);
-            width: var(--buffer-width, 0);
-            transition: width 0.2s ease;
         }
 
         .volume-container {
@@ -94,19 +112,6 @@
             animation: spin 1s linear infinite;
         }
 
-        .fullscreen-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.7);
-            justify-content: center;
-            align-items: center;
-            z-index: 999;
-        }
-
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -115,23 +120,20 @@
 </head>
 <body>
     <div class="loading-spinner" id="spinner"></div>
-    <div class="fullscreen-overlay" id="overlay">
-        <button class="button" style="font-size: 24px">↗</button>
-    </div>
 
     <div id="videoContainer">
         <video id="videoPlayer"></video>
+        <button class="big-play-button" id="playBtn">Play</button>
         <div class="controls">
-            <button class="button" id="playBtn">▶</button>
-            <button class="button" id="nextBtn">⏭</button>
+            <button class="button" id="nextBtn">Next</button>
             <div class="progress">
                 <div class="progress-filled"></div>
             </div>
             <div class="volume-container">
-                <button class="button" id="muteBtn">🔊</button>
+                <button class="button" id="muteBtn">Mute</button>
                 <input type="range" class="volume-slider" min="0" max="1" step="0.1" value="1">
             </div>
-            <button class="button" id="fullscreenBtn">⛶</button>
+            <button class="button" id="fullscreenBtn">Fullscreen</button>
         </div>
     </div>
 
@@ -195,6 +197,7 @@
         ]);
 
         const video = document.getElementById('videoPlayer');
+        const playBtn = document.getElementById('playBtn');
         let currentVideoIndex = -1;
         let isLoading = false;
         let autoplayAttempted = false;
@@ -216,24 +219,8 @@
             return array;
         }
 
-        function preloadNextVideo() {
-            if (isLoading || !videoSources.length) return;
-            const nextIndex = (currentVideoIndex + 1) % videoSources.length;
-            const cid = videoSources[nextIndex];
-            preloadVideo.src = getVideoUrl(cid);
-            preloadVideo.preload = 'auto';
-            preloadVideo.load().catch(() => {});
-        }
-
         async function loadNextVideo() {
-            if (isLoading || !videoSources.length) {
-                if (videoSources.length === 0) {
-                    console.error('No videos available');
-                    return;
-                }
-                return;
-            }
-            
+            if (isLoading || !videoSources.length) return;
             try {
                 isLoading = true;
                 document.getElementById('spinner').style.display = 'block';
@@ -270,67 +257,37 @@
                         autoplayAttempted = true;
                     }
                 } catch (playError) {
-                    document.getElementById('overlay').style.display = 'flex';
-                    throw new Error('Autoplay blocked');
+                    console.error('Autoplay blocked');
                 }
-
-                preloadNextVideo();
-
             } catch (error) {
                 console.error('Error loading video:', error);
-                if (currentVideoIndex >= 0) {
-                    videoSources.splice(currentVideoIndex, 1);
-                    currentVideoIndex--;
-                }
-                if (videoSources.length > 0) {
-                    loadNextVideo();
-                } else {
-                    console.error('All videos failed to load');
-                    document.getElementById('spinner').style.display = 'none';
-                }
             } finally {
                 isLoading = false;
                 document.getElementById('spinner').style.display = 'none';
             }
         }
 
-        video.addEventListener('progress', () => {
-            if (video.buffered.length > 0 && !isNaN(video.duration)) {
-                const bufferEnd = video.buffered.end(0);
-                const bufferWidth = (bufferEnd / video.duration) * 100;
-                document.querySelector('.progress').style.setProperty('--buffer-width', `${bufferWidth}%`);
-
-                if (bufferEnd - video.currentTime < 5 && !video.paused) {
-                    video.pause();
-                    const checkBuffer = setInterval(() => {
-                        if (video.buffered.length > 0 && video.buffered.end(0) - video.currentTime >= 2) {
-                            video.play().catch(() => {});
-                            clearInterval(checkBuffer);
-                        }
-                    }, 500);
-                }
+        // Play/Pause toggle using spacebar
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                event.preventDefault(); // Prevent page scrolling
+                video.paused ? video.play() : video.pause();
+                playBtn.style.display = video.paused ? 'block' : 'none'; // Toggle play button visibility
             }
         });
 
         video.addEventListener('ended', loadNextVideo);
-        video.addEventListener('error', () => !isLoading && loadNextVideo());
-        video.addEventListener('canplay', () => {
-            document.getElementById('overlay').style.display = 'none';
-        });
+        video.addEventListener('error', loadNextVideo);
 
-        document.getElementById('overlay').addEventListener('click', () => {
-            video.play().catch(() => {});
-            document.getElementById('overlay').style.display = 'none';
-        });
-
-        document.getElementById('playBtn').addEventListener('click', () => {
+        playBtn.addEventListener('click', () => {
             video.paused ? video.play() : video.pause();
+            playBtn.style.display = video.paused ? 'block' : 'none'; // Toggle play button visibility
         });
 
         document.getElementById('nextBtn').addEventListener('click', loadNextVideo);
         document.getElementById('muteBtn').addEventListener('click', () => {
             video.muted = !video.muted;
-            document.getElementById('muteBtn').textContent = video.muted ? '🔇' : '🔊';
+            document.getElementById('muteBtn').textContent = video.muted ? 'Unmute' : 'Mute';
         });
 
         document.querySelector('.volume-slider').addEventListener('input', (e) => {
@@ -345,20 +302,28 @@
             }
         });
 
-        let lastUpdate = 0;
-        video.addEventListener('timeupdate', () => {
-            const now = Date.now();
-            if (now - lastUpdate > 100) {
-                const progress = (video.currentTime / video.duration) * 100;
-                document.querySelector('.progress-filled').style.width = `${progress}%`;
-                lastUpdate = now;
-            }
-        });
+        let clickCount = 0;
+        video.addEventListener('click', () => {
+            clickCount++;
 
-        document.querySelector('.progress').addEventListener('click', (e) => {
-            const rect = e.target.getBoundingClientRect();
-            const pos = (e.clientX - rect.left) / rect.width;
-            video.currentTime = pos * video.duration;
+            if (clickCount === 1) {
+                // Play/Pause video
+                video.paused ? video.play() : video.pause();
+                playBtn.style.display = video.paused ? 'block' : 'none'; // Toggle play button visibility
+            } else if (clickCount === 2) {
+                // Enter/Exit fullscreen
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen();
+                } else {
+                    document.exitFullscreen();
+                }
+                clickCount = 0; // Reset click count
+            }
+
+            // Reset clickCount after a short delay to detect double click properly
+            setTimeout(() => {
+                clickCount = 0;
+            }, 300); // Timeout duration to detect double click (300ms)
         });
 
         if (videoSources.length > 0) {
