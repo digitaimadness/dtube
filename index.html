@@ -1,6 +1,20 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        iframe {
+            width: 100%;
+            height: 100vh;
+            border: none;
+        }
+    </style>
+</head>
+<body>
     <script>
         const webpages = [
             "https://bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou.ipfs.inbrowser.dev",
@@ -59,11 +73,10 @@
             "https://bafybeih2yd4mixfhetkgdscfyeywmxg5bwr2wcgwkse3mbvorozhpao6em.ipfs.inbrowser.dev",
             "https://bafybeifwq4kyid4lsrxzf3qjmeq6rpbkcrxwkxtujwdb4cabudedzknvbq.ipfs.inbrowser.dev"
         ];
-        const randomPage = webpages[Math.floor(Math.random() * webpages.length)];
-        window.location.href = randomPage;
+        const iframe = document.createElement('iframe');
+        iframe.src = webpages[Math.floor(Math.random() * webpages.length)];
+        iframe.frameBorder = '0';
+        document.body.appendChild(iframe);
     </script>
-</head>
-<body>
-    <h1>IT JUST REDIRECTS!!!</h1>
 </body>
 </html>
