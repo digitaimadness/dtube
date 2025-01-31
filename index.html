@@ -7,32 +7,55 @@
             padding: 0;
             overflow: hidden;
             position: relative;
+            background: #000;
         }
         iframe {
             width: 100%;
             height: 100vh;
             border: none;
         }
-        #fullscreen-btn {
+        #controls {
             position: fixed;
             top: 10px;
             right: 10px;
             z-index: 999;
+            display: flex;
+            gap: 10px;
+        }
+        button {
             padding: 8px 12px;
             background: rgba(0,0,0,0.7);
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            backdrop-filter: blur(5px);
         }
-        #fullscreen-btn:hover {
+        button:hover {
             background: rgba(0,0,0,0.9);
+        }
+        #status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 999;
+            backdrop-filter: blur(5px);
         }
     </style>
 </head>
 <body>
+    <div id="status">LOADING...</div>
+    <div id="controls">
+        <button id="fullscreen-btn">FULLSCREEN</button>
+        <button id="reload-btn">SHUFFLE</button>
+    </div>
+
     <script>
-        const webpages = [
+        const webpages = [[
             "https://bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou.ipfs.inbrowser.dev",
             "https://bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu.ipfs.inbrowser.dev",
             "https://bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq.ipfs.inbrowser.dev",
@@ -89,24 +112,104 @@
             "https://bafybeih2yd4mixfhetkgdscfyeywmxg5bwr2wcgwkse3mbvorozhpao6em.ipfs.inbrowser.dev",
             "https://bafybeifwq4kyid4lsrxzf3qjmeq6rpbkcrxwkxtujwdb4cabudedzknvbq.ipfs.inbrowser.dev"
         ];
-        const iframe = document.createElement('iframe');
-        iframe.src = webpages[Math.floor(Math.random() * webpages.length)];
-        iframe.allow = "autoplay; fullscreen";
-        iframe.frameBorder = '0';
-        document.body.appendChild(iframe);
-        const fullscreenBtn = document.createElement('button');
-        fullscreenBtn.id = 'fullscreen-btn';
-        fullscreenBtn.textContent = '📺';
-        document.body.appendChild(fullscreenBtn);
-        fullscreenBtn.addEventListener('click', () => {
+        const DEFAULT_DURATION = 45; // Fallback duration in seconds
+        const STALE_THRESHOLD = 5; // Number of stale checks before reload
+        
+        let currentURL;
+        let staleCount = 0;
+        let lastSize = 0;
+        let fallbackTimer;
+
+        function initPlayer() {
+            // Clear previous state
+            staleCount = 0;
+            lastSize = 0;
+            
+            // Select random URL
+            currentURL = webpages[Math.floor(Math.random() * webpages.length)];
+            updateStatus(`LOADING: ${new URL(currentURL).hostname}`);
+
+            // Create iframe
+            const iframe = document.createElement('iframe');
+            iframe.src = currentURL;
+            iframe.allow = "autoplay; fullscreen";
+            iframe.style.visibility = 'hidden';
+            
+            // Replace existing iframe
+            const oldIframe = document.querySelector('iframe');
+            if (oldIframe) oldIframe.remove();
+            document.body.appendChild(iframe);
+
+            // Start monitoring when iframe loads
+            iframe.addEventListener('load', () => {
+                iframe.style.visibility = 'visible';
+                startMonitoring();
+                startFallbackTimer();
+            });
+        }
+
+        function startMonitoring() {
+            const monitorInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(currentURL, {method: 'HEAD'});
+                    const newSize = parseInt(response.headers.get('content-length')) || 0;
+                    
+                    if (newSize === lastSize) {
+                        staleCount++;
+                        updateStatus(`Playing (${staleCount}/${STALE_THRESHOLD})`);
+                        if (staleCount >= STALE_THRESHOLD) {
+                            clearInterval(monitorInterval);
+                            reloadPlayer();
+                        }
+                    } else {
+                        staleCount = 0;
+                        lastSize = newSize;
+                        updateStatus('Playing ▶️');
+                    }
+                } catch (error) {
+                    staleCount++;
+                    updateStatus('Monitoring error - Using fallback');
+                }
+            }, 5000);
+        }
+
+        function startFallbackTimer() {
+            let timeLeft = DEFAULT_DURATION;
+            fallbackTimer = setInterval(() => {
+                timeLeft--;
+                document.querySelector('#status').textContent += ` [Fallback: ${timeLeft}s]`;
+                if (timeLeft <= 0) {
+                    clearInterval(fallbackTimer);
+                    reloadPlayer();
+                }
+            }, 1000);
+        }
+
+        function reloadPlayer() {
+            clearInterval(fallbackTimer);
+            updateStatus('Reloading...');
+            setTimeout(initPlayer, 1000);
+        }
+
+        function updateStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
+
+        // Fullscreen control
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+            const elem = document.querySelector('iframe');
             if (!document.fullscreenElement) {
-                iframe.requestFullscreen().catch(err => {
-                    alert(`fullscreen error! ${err.message}`);
-                });
+                elem.requestFullscreen().catch(console.error);
             } else {
                 document.exitFullscreen();
             }
         });
+
+        // Manual reload
+        document.getElementById('reload-btn').addEventListener('click', reloadPlayer);
+
+        // Initialize player
+        initPlayer();
     </script>
 </body>
 </html>
