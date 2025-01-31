@@ -3,27 +3,20 @@
 <head>
     <title>dtube</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            height: 100vh;
-            background: #0a192f;
-            font-family: 'Roboto', sans-serif;
-            transition: cursor 0.3s;
-        }
-
-        body.inactive {
-            cursor: none;
+            margin: 0;
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
         #videoContainer {
-            height: 100vh;
+            flex-grow: 1;
             position: relative;
-            background: #000;
+            background: black;
         }
 
         #videoPlayer {
@@ -33,119 +26,90 @@
         }
 
         .controls {
-            position: fixed;
+            position: absolute;
             bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(transparent, rgba(10, 25, 47, 0.95));
-            backdrop-filter: blur(10px);
-            padding: 15px 20px;
+            width: 100%;
+            background: linear-gradient(transparent, rgba(0,0,0,0.7));
+            padding: 15px 0;
             display: flex;
             align-items: center;
-            gap: 15px;
-            transform: translateY(100%);
-            transition: transform 0.3s ease;
-        }
-
-        #videoContainer:hover .controls:not(.force-hidden) {
-            transform: translateY(0);
-        }
-
-        body.inactive #videoContainer .controls {
-            transform: translateY(100%) !important;
+            box-sizing: border-box;
         }
 
         .button {
-            background: rgba(26, 54, 90, 0.9);
+            background: none;
             border: none;
-            color: #fff;
-            padding: 12px;
-            border-radius: 50%;
+            color: white;
             cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        .button:hover {
-            background: #3b82f6;
-            transform: scale(1.1);
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+            padding: 8px;
+            font-size: 20px;
         }
 
         .progress {
-            flex-grow: 1;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            cursor: pointer;
             position: relative;
-            overflow: hidden;
+            height: 8px;
+            background: #555;
+            flex-grow: 1;
+            margin: 0 10px;
+            cursor: pointer;
         }
 
         .progress-filled {
             height: 100%;
-            background: linear-gradient(90deg, #3b82f6, #60a5fa);
-            border-radius: 3px;
+            background: #ff0000;
             width: 0%;
-            transition: width 0.1s linear;
+        }
+
+        .progress::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.3);
+            width: var(--buffer-width, 0);
+            transition: width 0.2s ease;
         }
 
         .volume-container {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 5px;
         }
 
         .volume-slider {
-            width: 100px;
-            height: 5px;
-            -webkit-appearance: none;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
+            width: 80px;
         }
 
-        .volume-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 14px;
-            height: 14px;
-            background: #3b82f6;
+        .loading-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
             border-radius: 50%;
-            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
         }
 
         .fullscreen-overlay {
+            display: none;
             position: fixed;
             top: 0;
             left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            display: none;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
             justify-content: center;
             align-items: center;
             z-index: 999;
         }
 
-        .loading-spinner {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 40px;
-            height: 40px;
-            border: 4px solid rgba(59, 130, 246, 0.2);
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            display: none;
-        }
-
         @keyframes spin {
-            to { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-
-        #preloadVideo {
-            display: none;
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -157,7 +121,6 @@
 
     <div id="videoContainer">
         <video id="videoPlayer"></video>
-        <video id="preloadVideo"></video>
         <div class="controls">
             <button class="button" id="playBtn">▶</button>
             <button class="button" id="nextBtn">⏭</button>
@@ -174,68 +137,76 @@
 
     <script>
         const videoSources = shuffleArray([
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidl2t566mip6tsmx2lbfxiydbvcdglq5qnkpdvrkje2uqxyf6rjom",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeibvmhfd4mnnyqv2zf3l22wndpzrgoficslxxtktmhdpbtzq72wm3u",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeicqxewkc5btmz44bdc6spe3s4yrfpjzuhbga2y6vydnsib4z3lsgq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiboxgm6xlz5arh6lhzbpowc6gtscshrwsnj6dkrffzuqpk7n3an4q",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeieadukgtpiyyo46xje34hmd3k4nyqphihi3uuvntrkvjjliqbixze",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeicwq3gxtay7xgc7dxfd3oda5o6ypebyrrav5sm7w4blqt5pdl4fbi",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidcpcb3ksqsomth3dyumfa6umdhye7cre75sn6jl2fyba5tymapl4",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeichqv6feek6txormpcxenwnsnv3gswohyp3zc4zlrnyxg5bavnmim",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigm5vud4d6jvsma2kgcgw3phjoimvrwdyisjoxezh4qj7kff2vf24",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeid6hz6f3yokuzo3cdotvck4d43avol3pfw3wccx6bzprpch5hvvwu",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidkpopiwmpxkilx4llay354dpqdndqzv7pzc6oyffziolskdfftfm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeifrh25cck2yue5yeesdzqlfh3p7mz7e7vkvfini5vdjtjosq7epxi",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigqvv5fjoi2jpyvhpxzqcuadd2fpqio56sukmcckig6di2tg7rv7q",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeifkoazphnc4fzeaf6b6wnhbvuscsbvj54tn5h565alhm2mjdtedii",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeicqw4jgftp3rnmke2ixvb3auukeaauymj6y3g4b552sxvvf6adygm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeie2y67hpmxoxpxkdez3veezjj6rchn4vi5ckoy7ngysn34w3h34w4",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiczqttpr664lwktlcmrzvwr6oeemwn5howixjxynkorapjw7t7jze",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidcddfku264l3gqb4sdi3qwyrbrwulzg5qpbpvfpslbkyqwl5p2yy",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeihiwcl42ukgcn3e3pszu46da2fbnn2xatyjqofyyeahfgu362wysq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeia7kqdwptsbetoj4gy5a73lohyuokudurijzmarq247uzveiegenu",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigdpqir5ehfqyuhmctcwkxoqchhbbrrgp6aj76pb3y7b2ot4mm4dq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeihb27cory76wmbm3n5gwuu2yiluyuuhpomot54gsfdszewix7eycm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeibob3v7y7aiuzksield65oybwtvhraorte34i5hqknmkdoxv4klae",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigdqsp2qfsf7cmhqjw72qt4wjrhr5irp637wyeiyd3jp75uyeq6ey",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeihjurlpa2ztfy7cia6fxr7cj225rojhxapuj2rtvkruot7skabymy",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidcs2frwxv2h2wpv526iibe3vlbm2wo7fvjzqpm5o3oq32hkqlwte",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeid4yjs2hx7gjgottu4gktznbbwgqixa7yve7epdrqxro6g7qig2gm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeihsi46l5f7pfqgrj4ldmm6nqjjfmx4ryg4pq6ornzibsgscpqtjau",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeickclgl4lf2rc226ah4ltnweobtvzhhndl6y5lte2ibvcukwdigfm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiauuuk26dbi6hp3grb7xinajiwbwrlxhxh6pgg76bygewfiix7gka",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigcltvclgdajfbrjps2e5fuidwaepkfoaj2zze4emxqc7q4k5xjq4",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiavkrub4h54vpnpqzgnakg4g3zxgfo6x4iadbdn5ul3mqu6pb3dfq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidub3ahszzceoxq4ydfzpmip4dbr32wdjdeoqwycal6d4ax4dcg44",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeifxq3rr5fsry3dqw2new6465nuhrjtcpmcas7yqulcfjfighrhfui",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeibg5232wh75aff7sqm7r4pkqgubesashdq5ierjjd456hoeqqsylm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeibe4u7xzc7ltnjn5bqiriz3u54gy7j6f5b66tcg67skzfiwdsvufq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeigikt24xsc7dvi4l2bhpyyzp7beitfn5d7xcs4xqhzltd2tizdtii",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeihiacefc456xut4zbcnbncgv4zbtxcohesyhncqdq3hkvxtxoe7ue",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeie3gpjxt7pwwd4n4vysk2b74mgjiinkq32l5g72o7gtd3kujsldnq",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiedhvvpmqsknq4gxnfpa5rpiwpvrbwvb5jpgg3lfvhctqber5zzvi",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidopjeyl2dh2ykgjtrpqnxtksqdjvxsaj6f6rhegnzmr6pmkg74ui",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiboporsnuqxthnwzswvmaiisxbkfikzpop7cxd4awh3atgmk7qanm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiev2bvq4szisjwdnij7oecjfrb3zl4mozuwqublbmd3fmm7t5qzo4",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeiewukkgddr5ty2qe3tv2utvh2btncow3ur44uzsejbfysdamgurt4",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeif57zyt7hiljwx3amiwrcjdrv4sfqnp7bzjvmqnnz74z5pfymmztm",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeig4qr5hb46y6zfzqm35sfrqna3yqff3krgnlkobzhorbdbu2y5ome",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeifi6ffxdfm5rhd64d3ithx3jyvo6oqckcwizx47adz7rehe4faa6i",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeicpbxg7x4p5kpjgiiviaz6ydmiczrtzp65t6e5qygpvzfqgqe72iy",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeidg5tlc7huftdbs6bzc3hudrfhye4emg4ynijusymu7priwxjjtiy",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeih2yd4mixfhetkgdscfyeywmxg5bwr2wcgwkse3mbvorozhpao6em",
-            "https://ipfs.xn--vck1b.shop/ipfs/bafybeifwq4kyid4lsrxzf3qjmeq6rpbkcrxwkxtujwdb4cabudedzknvbq"
+            "bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou",
+            "bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu",
+            "bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq",
+            "bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e",
+            "bafybeidl2t566mip6tsmx2lbfxiydbvcdglq5qnkpdvrkje2uqxyf6rjom",
+            "bafybeibvmhfd4mnnyqv2zf3l22wndpzrgoficslxxtktmhdpbtzq72wm3u",
+            "bafybeicqxewkc5btmz44bdc6spe3s4yrfpjzuhbga2y6vydnsib4z3lsgq",
+            "bafybeiboxgm6xlz5arh6lhzbpowc6gtscshrwsnj6dkrffzuqpk7n3an4q",
+            "bafybeieadukgtpiyyo46xje34hmd3k4nyqphihi3uuvntrkvjjliqbixze",
+            "bafybeicwq3gxtay7xgc7dxfd3oda5o6ypebyrrav5sm7w4blqt5pdl4fbi",
+            "bafybeidcpcb3ksqsomth3dyumfa6umdhye7cre75sn6jl2fyba5tymapl4",
+            "bafybeichqv6feek6txormpcxenwnsnv3gswohyp3zc4zlrnyxg5bavnmim",
+            "bafybeigm5vud4d6jvsma2kgcgw3phjoimvrwdyisjoxezh4qj7kff2vf24",
+            "bafybeid6hz6f3yokuzo3cdotvck4d43avol3pfw3wccx6bzprpch5hvvwu",
+            "bafybeidkpopiwmpxkilx4llay354dpqdndqzv7pzc6oyffziolskdfftfm",
+            "bafybeifrh25cck2yue5yeesdzqlfh3p7mz7e7vkvfini5vdjtjosq7epxi",
+            "bafybeigqvv5fjoi2jpyvhpxzqcuadd2fpqio56sukmcckig6di2tg7rv7q",
+            "bafybeifkoazphnc4fzeaf6b6wnhbvuscsbvj54tn5h565alhm2mjdtedii",
+            "bafybeicqw4jgftp3rnmke2ixvb3auukeaauymj6y3g4b552sxvvf6adygm",
+            "bafybeie2y67hpmxoxpxkdez3veezjj6rchn4vi5ckoy7ngysn34w3h34w4",
+            "bafybeiczqttpr664lwktlcmrzvwr6oeemwn5howixjxynkorapjw7t7jze",
+            "bafybeidcddfku264l3gqb4sdi3qwyrbrwulzg5qpbpvfpslbkyqwl5p2yy",
+            "bafybeihiwcl42ukgcn3e3pszu46da2fbnn2xatyjqofyyeahfgu362wysq",
+            "bafybeia7kqdwptsbetoj4gy5a73lohyuokudurijzmarq247uzveiegenu",
+            "bafybeigdpqir5ehfqyuhmctcwkxoqchhbbrrgp6aj76pb3y7b2ot4mm4dq",
+            "bafybeihb27cory76wmbm3n5gwuu2yiluyuuhpomot54gsfdszewix7eycm",
+            "bafybeibob3v7y7aiuzksield65oybwtvhraorte34i5hqknmkdoxv4klae",
+            "bafybeigdqsp2qfsf7cmhqjw72qt4wjrhr5irp637wyeiyd3jp75uyeq6ey",
+            "bafybeihjurlpa2ztfy7cia6fxr7cj225rojhxapuj2rtvkruot7skabymy",
+            "bafybeidcs2frwxv2h2wpv526iibe3vlbm2wo7fvjzqpm5o3oq32hkqlwte",
+            "bafybeid4yjs2hx7gjgottu4gktznbbwgqixa7yve7epdrqxro6g7qig2gm",
+            "bafybeihsi46l5f7pfqgrj4ldmm6nqjjfmx4ryg4pq6ornzibsgscpqtjau",
+            "bafybeickclgl4lf2rc226ah4ltnweobtvzhhndl6y5lte2ibvcukwdigfm",
+            "bafybeiauuuk26dbi6hp3grb7xinajiwbwrlxhxh6pgg76bygewfiix7gka",
+            "bafybeigcltvclgdajfbrjps2e5fuidwaepkfoaj2zze4emxqc7q4k5xjq4",
+            "bafybeiavkrub4h54vpnpqzgnakg4g3zxgfo6x4iadbdn5ul3mqu6pb3dfq",
+            "bafybeidub3ahszzceoxq4ydfzpmip4dbr32wdjdeoqwycal6d4ax4dcg44",
+            "bafybeifxq3rr5fsry3dqw2new6465nuhrjtcpmcas7yqulcfjfighrhfui",
+            "bafybeibg5232wh75aff7sqm7r4pkqgubesashdq5ierjjd456hoeqqsylm",
+            "bafybeibe4u7xzc7ltnjn5bqiriz3u54gy7j6f5b66tcg67skzfiwdsvufq",
+            "bafybeigikt24xsc7dvi4l2bhpyyzp7beitfn5d7xcs4xqhzltd2tizdtii",
+            "bafybeihiacefc456xut4zbcnbncgv4zbtxcohesyhncqdq3hkvxtxoe7ue",
+            "bafybeie3gpjxt7pwwd4n4vysk2b74mgjiinkq32l5g72o7gtd3kujsldnq",
+            "bafybeiedhvvpmqsknq4gxnfpa5rpiwpvrbwvb5jpgg3lfvhctqber5zzvi",
+            "bafybeidopjeyl2dh2ykgjtrpqnxtksqdjvxsaj6f6rhegnzmr6pmkg74ui",
+            "bafybeiboporsnuqxthnwzswvmaiisxbkfikzpop7cxd4awh3atgmk7qanm",
+            "bafybeiev2bvq4szisjwdnij7oecjfrb3zl4mozuwqublbmd3fmm7t5qzo4",
+            "bafybeiewukkgddr5ty2qe3tv2utvh2btncow3ur44uzsejbfysdamgurt4",
+            "bafybeif57zyt7hiljwx3amiwrcjdrv4sfqnp7bzjvmqnnz74z5pfymmztm",
+            "bafybeig4qr5hb46y6zfzqm35sfrqna3yqff3krgnlkobzhorbdbu2y5ome",
+            "bafybeifi6ffxdfm5rhd64d3ithx3jyvo6oqckcwizx47adz7rehe4faa6i",
+            "bafybeicpbxg7x4p5kpjgiiviaz6ydmiczrtzp65t6e5qygpvzfqgqe72iy",
+            "bafybeidg5tlc7huftdbs6bzc3hudrfhye4emg4ynijusymu7priwxjjtiy",
+            "bafybeih2yd4mixfhetkgdscfyeywmxg5bwr2wcgwkse3mbvorozhpao6em",
+            "bafybeifwq4kyid4lsrxzf3qjmeq6rpbkcrxwkxtujwdb4cabudedzknvbq"
         ]);
 
         const video = document.getElementById('videoPlayer');
-        const preloadVideo = document.getElementById('preloadVideo');
         let currentVideoIndex = -1;
         let isLoading = false;
-        let inactivityTimer;
+        let autoplayAttempted = false;
+        const preloadVideo = document.createElement('video');
+        preloadVideo.style.display = 'none';
+        document.body.appendChild(preloadVideo);
+
+        function getVideoUrl(cid, retry = false) {
+            const providers = ['dweb.link', 'w3s.link'];
+            if (retry) providers.reverse();
+            return `https://${cid}.ipfs.${providers[0]}`;
+        }
 
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
@@ -246,87 +217,124 @@
         }
 
         function preloadNextVideo() {
-            if (isLoading) return;
+            if (isLoading || !videoSources.length) return;
             const nextIndex = (currentVideoIndex + 1) % videoSources.length;
-            preloadVideo.src = videoSources[nextIndex];
-            preloadVideo.load();
+            const cid = videoSources[nextIndex];
+            preloadVideo.src = getVideoUrl(cid);
+            preloadVideo.preload = 'auto';
+            preloadVideo.load().catch(() => {});
         }
 
         async function loadNextVideo() {
+            if (isLoading || !videoSources.length) {
+                if (videoSources.length === 0) {
+                    console.error('No videos available');
+                    return;
+                }
+                return;
+            }
+            
             try {
                 isLoading = true;
                 document.getElementById('spinner').style.display = 'block';
                 video.pause();
 
-                const nextIndex = (currentVideoIndex + 1) % videoSources.length;
-                
-                if (preloadVideo.src === videoSources[nextIndex] && preloadVideo.readyState >= 3) {
-                    video.src = preloadVideo.src;
-                    currentVideoIndex = nextIndex;
-                    preloadNextVideo();
-                } else {
-                    currentVideoIndex = nextIndex;
-                    video.src = videoSources[currentVideoIndex];
-                    preloadNextVideo();
+                currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+                const cid = videoSources[currentVideoIndex];
+                let currentUrl = getVideoUrl(cid);
+                let retryCount = 0;
+
+                const loadVideo = async (url) => {
+                    video.src = url;
+                    await new Promise((resolve, reject) => {
+                        video.addEventListener('canplaythrough', resolve, { once: true });
+                        video.addEventListener('error', reject, { once: true });
+                    });
+                };
+
+                while (retryCount < 2) {
+                    try {
+                        await loadVideo(currentUrl);
+                        break;
+                    } catch (err) {
+                        retryCount++;
+                        currentUrl = getVideoUrl(cid, true);
+                    }
                 }
 
-                await video.play();
+                if (retryCount >= 2) throw new Error('Both providers failed');
+
+                try {
+                    if (!autoplayAttempted) {
+                        await video.play();
+                        autoplayAttempted = true;
+                    }
+                } catch (playError) {
+                    document.getElementById('overlay').style.display = 'flex';
+                    throw new Error('Autoplay blocked');
+                }
+
+                preloadNextVideo();
+
             } catch (error) {
                 console.error('Error loading video:', error);
-                loadNextVideo();
+                if (currentVideoIndex >= 0) {
+                    videoSources.splice(currentVideoIndex, 1);
+                    currentVideoIndex--;
+                }
+                if (videoSources.length > 0) {
+                    loadNextVideo();
+                } else {
+                    console.error('All videos failed to load');
+                    document.getElementById('spinner').style.display = 'none';
+                }
             } finally {
                 isLoading = false;
                 document.getElementById('spinner').style.display = 'none';
             }
         }
 
-        function resetInactivityTimer() {
-            clearTimeout(inactivityTimer);
-            document.body.classList.remove('inactive');
-            inactivityTimer = setTimeout(() => {
-                document.body.classList.add('inactive');
-            }, 3000);
-        }
+        video.addEventListener('progress', () => {
+            if (video.buffered.length > 0 && !isNaN(video.duration)) {
+                const bufferEnd = video.buffered.end(0);
+                const bufferWidth = (bufferEnd / video.duration) * 100;
+                document.querySelector('.progress').style.setProperty('--buffer-width', `${bufferWidth}%`);
 
-        // Initial setup
-        resetInactivityTimer();
-        document.addEventListener('mousemove', resetInactivityTimer);
-        document.addEventListener('mousedown', resetInactivityTimer);
-        document.addEventListener('keydown', resetInactivityTimer);
+                if (bufferEnd - video.currentTime < 5 && !video.paused) {
+                    video.pause();
+                    const checkBuffer = setInterval(() => {
+                        if (video.buffered.length > 0 && video.buffered.end(0) - video.currentTime >= 2) {
+                            video.play().catch(() => {});
+                            clearInterval(checkBuffer);
+                        }
+                    }, 500);
+                }
+            }
+        });
 
         video.addEventListener('ended', loadNextVideo);
-        video.addEventListener('waiting', () => {
-            document.getElementById('spinner').style.display = 'block';
-        });
+        video.addEventListener('error', () => !isLoading && loadNextVideo());
         video.addEventListener('canplay', () => {
-            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('overlay').style.display = 'none';
         });
 
-        video.addEventListener('error', () => {
-            if (video.error.code === video.error.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-                loadNextVideo();
-            }
+        document.getElementById('overlay').addEventListener('click', () => {
+            video.play().catch(() => {});
+            document.getElementById('overlay').style.display = 'none';
         });
 
         document.getElementById('playBtn').addEventListener('click', () => {
             video.paused ? video.play() : video.pause();
-            resetInactivityTimer();
         });
 
-        document.getElementById('nextBtn').addEventListener('click', () => {
-            loadNextVideo();
-            resetInactivityTimer();
-        });
-
+        document.getElementById('nextBtn').addEventListener('click', loadNextVideo);
         document.getElementById('muteBtn').addEventListener('click', () => {
             video.muted = !video.muted;
             document.getElementById('muteBtn').textContent = video.muted ? '🔇' : '🔊';
-            resetInactivityTimer();
         });
 
         document.querySelector('.volume-slider').addEventListener('input', (e) => {
             video.volume = e.target.value;
-            resetInactivityTimer();
         });
 
         document.getElementById('fullscreenBtn').addEventListener('click', () => {
@@ -335,7 +343,6 @@
             } else {
                 document.exitFullscreen();
             }
-            resetInactivityTimer();
         });
 
         let lastUpdate = 0;
@@ -352,14 +359,13 @@
             const rect = e.target.getBoundingClientRect();
             const pos = (e.clientX - rect.left) / rect.width;
             video.currentTime = pos * video.duration;
-            resetInactivityTimer();
         });
 
-        document.getElementById('overlay').addEventListener('click', () => {
-            video.play();
-            document.getElementById('overlay').style.display = 'none';
-            resetInactivityTimer();
-        });
+        if (videoSources.length > 0) {
+            loadNextVideo();
+        } else {
+            console.error('No video sources available');
+        }
     </script>
 </body>
 </html>
