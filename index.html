@@ -4,6 +4,7 @@
     <style>
         body {
             margin: 0;
+<<<<<<< HEAD
             padding: 0;
             overflow: hidden;
             position: relative;
@@ -27,10 +28,118 @@
         }
         #fullscreen-btn:hover {
             background: rgba(0,0,0,0.9);
+=======
+            background: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #videoContainer {
+            flex-grow: 1;
+            position: relative;
+            background: black;
+        }
+
+        #videoPlayer {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: linear-gradient(transparent, rgba(0,0,0,0.7));
+            padding: 15px 0;
+            display: flex;
+            align-items: center;
+            box-sizing: border-box;
+        }
+
+        .button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 8px;
+            font-size: 20px;
+        }
+
+        .progress {
+            position: relative;
+            height: 8px;
+            background: #555;
+            flex-grow: 1;
+            margin: 0 10px;
+            cursor: pointer;
+        }
+
+        .progress-filled {
+            height: 100%;
+            background: #ff0000;
+            width: 0%;
+        }
+
+        .progress::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.3);
+            width: var(--buffer-width, 0);
+            transition: width 0.2s ease;
+        }
+
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .volume-slider {
+            width: 80px;
+        }
+
+        .loading-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        .fullscreen-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+>>>>>>> dtube
         }
     </style>
 </head>
 <body>
+<<<<<<< HEAD
     <script>
         const webpages = [
             "https://bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou.ipfs.inbrowser.dev",
@@ -99,6 +208,232 @@
         fullscreenBtn.textContent = '📺';
         document.body.appendChild(fullscreenBtn);
         fullscreenBtn.addEventListener('click', () => {
+=======
+    <div class="loading-spinner" id="spinner"></div>
+    <div class="fullscreen-overlay" id="overlay">
+        <button class="button" style="font-size: 24px">↗</button>
+    </div>
+
+    <div id="videoContainer">
+        <video id="videoPlayer"></video>
+        <div class="controls">
+            <button class="button" id="playBtn">▶</button>
+            <button class="button" id="nextBtn">⏭</button>
+            <div class="progress">
+                <div class="progress-filled"></div>
+            </div>
+            <div class="volume-container">
+                <button class="button" id="muteBtn">🔊</button>
+                <input type="range" class="volume-slider" min="0" max="1" step="0.1" value="1">
+            </div>
+            <button class="button" id="fullscreenBtn">⛶</button>
+        </div>
+    </div>
+
+    <script>
+        const videoSources = shuffleArray([
+            "bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou",
+            "bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu",
+            "bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq",
+            "bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e",
+            "bafybeidl2t566mip6tsmx2lbfxiydbvcdglq5qnkpdvrkje2uqxyf6rjom",
+            "bafybeibvmhfd4mnnyqv2zf3l22wndpzrgoficslxxtktmhdpbtzq72wm3u",
+            "bafybeicqxewkc5btmz44bdc6spe3s4yrfpjzuhbga2y6vydnsib4z3lsgq",
+            "bafybeiboxgm6xlz5arh6lhzbpowc6gtscshrwsnj6dkrffzuqpk7n3an4q",
+            "bafybeieadukgtpiyyo46xje34hmd3k4nyqphihi3uuvntrkvjjliqbixze",
+            "bafybeicwq3gxtay7xgc7dxfd3oda5o6ypebyrrav5sm7w4blqt5pdl4fbi",
+            "bafybeidcpcb3ksqsomth3dyumfa6umdhye7cre75sn6jl2fyba5tymapl4",
+            "bafybeichqv6feek6txormpcxenwnsnv3gswohyp3zc4zlrnyxg5bavnmim",
+            "bafybeigm5vud4d6jvsma2kgcgw3phjoimvrwdyisjoxezh4qj7kff2vf24",
+            "bafybeid6hz6f3yokuzo3cdotvck4d43avol3pfw3wccx6bzprpch5hvvwu",
+            "bafybeidkpopiwmpxkilx4llay354dpqdndqzv7pzc6oyffziolskdfftfm",
+            "bafybeifrh25cck2yue5yeesdzqlfh3p7mz7e7vkvfini5vdjtjosq7epxi",
+            "bafybeigqvv5fjoi2jpyvhpxzqcuadd2fpqio56sukmcckig6di2tg7rv7q",
+            "bafybeifkoazphnc4fzeaf6b6wnhbvuscsbvj54tn5h565alhm2mjdtedii",
+            "bafybeicqw4jgftp3rnmke2ixvb3auukeaauymj6y3g4b552sxvvf6adygm",
+            "bafybeie2y67hpmxoxpxkdez3veezjj6rchn4vi5ckoy7ngysn34w3h34w4",
+            "bafybeiczqttpr664lwktlcmrzvwr6oeemwn5howixjxynkorapjw7t7jze",
+            "bafybeidcddfku264l3gqb4sdi3qwyrbrwulzg5qpbpvfpslbkyqwl5p2yy",
+            "bafybeihiwcl42ukgcn3e3pszu46da2fbnn2xatyjqofyyeahfgu362wysq",
+            "bafybeia7kqdwptsbetoj4gy5a73lohyuokudurijzmarq247uzveiegenu",
+            "bafybeigdpqir5ehfqyuhmctcwkxoqchhbbrrgp6aj76pb3y7b2ot4mm4dq",
+            "bafybeihb27cory76wmbm3n5gwuu2yiluyuuhpomot54gsfdszewix7eycm",
+            "bafybeibob3v7y7aiuzksield65oybwtvhraorte34i5hqknmkdoxv4klae",
+            "bafybeigdqsp2qfsf7cmhqjw72qt4wjrhr5irp637wyeiyd3jp75uyeq6ey",
+            "bafybeihjurlpa2ztfy7cia6fxr7cj225rojhxapuj2rtvkruot7skabymy",
+            "bafybeidcs2frwxv2h2wpv526iibe3vlbm2wo7fvjzqpm5o3oq32hkqlwte",
+            "bafybeid4yjs2hx7gjgottu4gktznbbwgqixa7yve7epdrqxro6g7qig2gm",
+            "bafybeihsi46l5f7pfqgrj4ldmm6nqjjfmx4ryg4pq6ornzibsgscpqtjau",
+            "bafybeickclgl4lf2rc226ah4ltnweobtvzhhndl6y5lte2ibvcukwdigfm",
+            "bafybeiauuuk26dbi6hp3grb7xinajiwbwrlxhxh6pgg76bygewfiix7gka",
+            "bafybeigcltvclgdajfbrjps2e5fuidwaepkfoaj2zze4emxqc7q4k5xjq4",
+            "bafybeiavkrub4h54vpnpqzgnakg4g3zxgfo6x4iadbdn5ul3mqu6pb3dfq",
+            "bafybeidub3ahszzceoxq4ydfzpmip4dbr32wdjdeoqwycal6d4ax4dcg44",
+            "bafybeifxq3rr5fsry3dqw2new6465nuhrjtcpmcas7yqulcfjfighrhfui",
+            "bafybeibg5232wh75aff7sqm7r4pkqgubesashdq5ierjjd456hoeqqsylm",
+            "bafybeibe4u7xzc7ltnjn5bqiriz3u54gy7j6f5b66tcg67skzfiwdsvufq",
+            "bafybeigikt24xsc7dvi4l2bhpyyzp7beitfn5d7xcs4xqhzltd2tizdtii",
+            "bafybeihiacefc456xut4zbcnbncgv4zbtxcohesyhncqdq3hkvxtxoe7ue",
+            "bafybeie3gpjxt7pwwd4n4vysk2b74mgjiinkq32l5g72o7gtd3kujsldnq",
+            "bafybeiedhvvpmqsknq4gxnfpa5rpiwpvrbwvb5jpgg3lfvhctqber5zzvi",
+            "bafybeidopjeyl2dh2ykgjtrpqnxtksqdjvxsaj6f6rhegnzmr6pmkg74ui",
+            "bafybeiboporsnuqxthnwzswvmaiisxbkfikzpop7cxd4awh3atgmk7qanm",
+            "bafybeiev2bvq4szisjwdnij7oecjfrb3zl4mozuwqublbmd3fmm7t5qzo4",
+            "bafybeiewukkgddr5ty2qe3tv2utvh2btncow3ur44uzsejbfysdamgurt4",
+            "bafybeif57zyt7hiljwx3amiwrcjdrv4sfqnp7bzjvmqnnz74z5pfymmztm",
+            "bafybeig4qr5hb46y6zfzqm35sfrqna3yqff3krgnlkobzhorbdbu2y5ome",
+            "bafybeifi6ffxdfm5rhd64d3ithx3jyvo6oqckcwizx47adz7rehe4faa6i",
+            "bafybeicpbxg7x4p5kpjgiiviaz6ydmiczrtzp65t6e5qygpvzfqgqe72iy",
+            "bafybeidg5tlc7huftdbs6bzc3hudrfhye4emg4ynijusymu7priwxjjtiy",
+            "bafybeih2yd4mixfhetkgdscfyeywmxg5bwr2wcgwkse3mbvorozhpao6em",
+            "bafybeifwq4kyid4lsrxzf3qjmeq6rpbkcrxwkxtujwdb4cabudedzknvbq"
+        ]);
+
+        const video = document.getElementById('videoPlayer');
+        let currentVideoIndex = -1;
+        let isLoading = false;
+        let autoplayAttempted = false;
+        const preloadVideo = document.createElement('video');
+        preloadVideo.style.display = 'none';
+        document.body.appendChild(preloadVideo);
+
+        function getVideoUrl(cid, retry = false) {
+            const providers = ['dweb.link', 'w3s.link'];
+            if (retry) providers.reverse();
+            return `https://${cid}.ipfs.${providers[0]}`;
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function preloadNextVideo() {
+            if (isLoading || !videoSources.length) return;
+            const nextIndex = (currentVideoIndex + 1) % videoSources.length;
+            const cid = videoSources[nextIndex];
+            preloadVideo.src = getVideoUrl(cid);
+            preloadVideo.preload = 'auto';
+            preloadVideo.load().catch(() => {});
+        }
+
+        async function loadNextVideo() {
+            if (isLoading || !videoSources.length) {
+                if (videoSources.length === 0) {
+                    console.error('No videos available');
+                    return;
+                }
+                return;
+            }
+            
+            try {
+                isLoading = true;
+                document.getElementById('spinner').style.display = 'block';
+                video.pause();
+
+                currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+                const cid = videoSources[currentVideoIndex];
+                let currentUrl = getVideoUrl(cid);
+                let retryCount = 0;
+
+                const loadVideo = async (url) => {
+                    video.src = url;
+                    await new Promise((resolve, reject) => {
+                        video.addEventListener('canplaythrough', resolve, { once: true });
+                        video.addEventListener('error', reject, { once: true });
+                    });
+                };
+
+                while (retryCount < 2) {
+                    try {
+                        await loadVideo(currentUrl);
+                        break;
+                    } catch (err) {
+                        retryCount++;
+                        currentUrl = getVideoUrl(cid, true);
+                    }
+                }
+
+                if (retryCount >= 2) throw new Error('Both providers failed');
+
+                try {
+                    if (!autoplayAttempted) {
+                        await video.play();
+                        autoplayAttempted = true;
+                    }
+                } catch (playError) {
+                    document.getElementById('overlay').style.display = 'flex';
+                    throw new Error('Autoplay blocked');
+                }
+
+                preloadNextVideo();
+
+            } catch (error) {
+                console.error('Error loading video:', error);
+                if (currentVideoIndex >= 0) {
+                    videoSources.splice(currentVideoIndex, 1);
+                    currentVideoIndex--;
+                }
+                if (videoSources.length > 0) {
+                    loadNextVideo();
+                } else {
+                    console.error('All videos failed to load');
+                    document.getElementById('spinner').style.display = 'none';
+                }
+            } finally {
+                isLoading = false;
+                document.getElementById('spinner').style.display = 'none';
+            }
+        }
+
+        video.addEventListener('progress', () => {
+            if (video.buffered.length > 0 && !isNaN(video.duration)) {
+                const bufferEnd = video.buffered.end(0);
+                const bufferWidth = (bufferEnd / video.duration) * 100;
+                document.querySelector('.progress').style.setProperty('--buffer-width', `${bufferWidth}%`);
+
+                if (bufferEnd - video.currentTime < 5 && !video.paused) {
+                    video.pause();
+                    const checkBuffer = setInterval(() => {
+                        if (video.buffered.length > 0 && video.buffered.end(0) - video.currentTime >= 2) {
+                            video.play().catch(() => {});
+                            clearInterval(checkBuffer);
+                        }
+                    }, 500);
+                }
+            }
+        });
+
+        video.addEventListener('ended', loadNextVideo);
+        video.addEventListener('error', () => !isLoading && loadNextVideo());
+        video.addEventListener('canplay', () => {
+            document.getElementById('overlay').style.display = 'none';
+        });
+
+        document.getElementById('overlay').addEventListener('click', () => {
+            video.play().catch(() => {});
+            document.getElementById('overlay').style.display = 'none';
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => {
+            video.paused ? video.play() : video.pause();
+        });
+
+        document.getElementById('nextBtn').addEventListener('click', loadNextVideo);
+        document.getElementById('muteBtn').addEventListener('click', () => {
+            video.muted = !video.muted;
+            document.getElementById('muteBtn').textContent = video.muted ? '🔇' : '🔊';
+        });
+
+        document.querySelector('.volume-slider').addEventListener('input', (e) => {
+            video.volume = e.target.value;
+        });
+
+        document.getElementById('fullscreenBtn').addEventListener('click', () => {
+>>>>>>> dtube
             if (!document.fullscreenElement) {
                 iframe.requestFullscreen().catch(err => {
                     alert(`fullscreen error! ${err.message}`);
@@ -107,6 +442,31 @@
                 document.exitFullscreen();
             }
         });
+<<<<<<< HEAD
+=======
+
+        let lastUpdate = 0;
+        video.addEventListener('timeupdate', () => {
+            const now = Date.now();
+            if (now - lastUpdate > 100) {
+                const progress = (video.currentTime / video.duration) * 100;
+                document.querySelector('.progress-filled').style.width = `${progress}%`;
+                lastUpdate = now;
+            }
+        });
+
+        document.querySelector('.progress').addEventListener('click', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            video.currentTime = pos * video.duration;
+        });
+
+        if (videoSources.length > 0) {
+            loadNextVideo();
+        } else {
+            console.error('No video sources available');
+        }
+>>>>>>> dtube
     </script>
 </body>
 </html>
