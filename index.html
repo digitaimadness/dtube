@@ -206,10 +206,23 @@
         document.body.appendChild(preloadVideo);
 
         function getVideoUrl(cid, retry = false) {
-            const providers = ['io', 'algonode.xyz','eth.aragon.network'];
+            const providers = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
+    
+        // If retry is true, reverse the providers array
             if (retry) providers.reverse();
-            return `https://ipfs.${providers[0]}/ipfs/${cid}`;
+    
+        // Select a random provider from the array
+            const randomProvider = providers[Math.floor(Math.random() * providers.length)];
+    
+        // If the provider is 'dweb.link' or 'flk-ipfs.xyz', use the new URL format
+            if (randomProvider === 'dweb.link' || randomProvider === 'flk-ipfs.xyz') {
+                return `https://${cid}.ipfs.${randomProvider}`;
         }
+    
+    // Otherwise, use the original URL structure
+        return `https://ipfs.${randomProvider}/ipfs/${cid}`;
+        }
+
 
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
