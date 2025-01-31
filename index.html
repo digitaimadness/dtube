@@ -206,9 +206,9 @@
         document.body.appendChild(preloadVideo);
 
         function getVideoUrl(cid, retry = false) {
-            const providers = ['dweb.link', 'w3s.link'];
+            const providers = ['io', 'algonode.xyz','eth.aragon.network'];
             if (retry) providers.reverse();
-            return `https://${cid}.ipfs.${providers[0]}`;
+            return `https://ipfs.${providers[0]}/ipfs/${cid}`;
         }
 
         function shuffleArray(array) {
