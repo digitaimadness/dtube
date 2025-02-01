@@ -39,6 +39,7 @@ const videoSources = shuffleArray([
   ]);
   
   const video = document.getElementById("videoPlayer");
+  video.preload = "auto"; // Ensure the video buffers progressively.
   const playBtn = document.getElementById("playBtn");
   let currentVideoIndex = -1;
   let isLoading = false;
@@ -98,9 +99,9 @@ const videoSources = shuffleArray([
   
       const loadVideo = async (url) => {
         video.src = url;
-        // Listen for success or error once
+        video.load(); // Start loading the video immediately.
         await new Promise((resolve, reject) => {
-          video.addEventListener("canplaythrough", resolve, { once: true });
+          video.addEventListener("canplay", resolve, { once: true }); // Changed from "canplaythrough"
           video.addEventListener("error", reject, { once: true });
         });
       };
@@ -172,6 +173,17 @@ const videoSources = shuffleArray([
     document.querySelector(".progress-filled").style.width = `${percentage}%`;
   });
   
+  // Update video buffering progress bar
+  function updateVideoBuffering() {
+    if (video.buffered.length > 0 && video.duration) {
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      const bufferedPercentage = (bufferedEnd / video.duration) * 100;
+      document.querySelector(".progress").style.background = `linear-gradient(to right, #ccc ${bufferedPercentage}%, #eee ${bufferedPercentage}%)`;
+    }
+  }
+  video.addEventListener("progress", updateVideoBuffering);
+  video.addEventListener("loadedmetadata", updateVideoBuffering);
+  
   // Seek video when clicking the progress bar
   document.querySelector(".progress").addEventListener("click", (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -209,3 +221,29 @@ const videoSources = shuffleArray([
   } else {
     console.error("No video sources available");
   }
+
+  // Assuming you have something like this in your HTML:
+  // <audio id="audioPlayer" src="your_audio_file.mp3"></audio>
+  // <div id="seekbar"></div>
+
+  const audio = document.getElementById('audioPlayer');
+  const seekbar = document.getElementById('seekbar');
+
+  // Update the seekbar to reflect the buffered amount
+  function updateBuffering() {
+    if (audio.buffered.length > 0 && audio.duration > 0) {
+      // Get the end time of the last buffered range
+      const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+      // Calculate the percentage of the audio that's been buffered
+      const bufferedPercent = (bufferedEnd / audio.duration) * 100;
+      // Update the seekbar to show the buffering progress
+      // In this example, the seekbar background displays the buffered part in #ccc and the rest in #eee.
+      seekbar.style.background = `linear-gradient(to right, #ccc ${bufferedPercent}%, #eee ${bufferedPercent}%)`;
+    }
+  }
+
+  // Listen for progress events to update buffering visuals
+  audio.addEventListener('progress', updateBuffering);
+  audio.addEventListener('loadedmetadata', updateBuffering);
+  // Optionally update as playback continues
+  audio.addEventListener('timeupdate', updateBuffering);
