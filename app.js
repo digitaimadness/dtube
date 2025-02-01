@@ -94,31 +94,12 @@ const videoSources = shuffleArray([
   
       currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
       const cid = videoSources[currentVideoIndex];
-      let currentUrl = getVideoUrl(cid);
-      let retryCount = 0;
-  
-      const loadVideo = async (url) => {
-        video.src = url;
-        video.load(); // Start loading the video immediately.
-        await new Promise((resolve, reject) => {
-          video.addEventListener("canplay", resolve, { once: true }); // Changed from "canplaythrough"
-          video.addEventListener("error", reject, { once: true });
-        });
-      };
-  
-      while (retryCount < 5) {
-        try {
-          await loadVideo(currentUrl);
-          break;
-        } catch (err) {
-          retryCount++;
-          // Try a different URL for the same CID
-          currentUrl = getVideoUrl(cid);
-        }
-      }
-  
-      if (retryCount >= 5) throw new Error("all providers failed");
-  
+
+      // Use the new helper to concurrently test providers
+      const url = await loadVideoFromCid(cid);
+      video.src = url;
+      video.load();
+
       if (!autoplayAttempted) {
         try {
           await video.play();
@@ -247,3 +228,47 @@ const videoSources = shuffleArray([
   audio.addEventListener('loadedmetadata', updateBuffering);
   // Optionally update as playback continues
   audio.addEventListener('timeupdate', updateBuffering);
+
+  function loadVideoFromCid(cid) {
+    return new Promise((resolve, reject) => {
+      const providers = ["io", "algonode.xyz", "eth.aragon.network", "dweb.link", "flk-ipfs.xyz"];
+      let resolved = false;
+      const testVideos = [];
+      let failureCount = 0;
+
+      providers.forEach(provider => {
+        const url = (provider === "dweb.link" || provider === "flk-ipfs.xyz")
+          ? `https://${cid}.ipfs.${provider}`
+          : `https://ipfs.${provider}/ipfs/${cid}`;
+
+        const testVideo = document.createElement("video");
+
+        // Attach event listeners before starting loading
+        testVideo.addEventListener("canplay", () => {
+          if (!resolved) {
+            resolved = true;
+            testVideos.forEach(v => v.remove());
+            resolve(url);
+          }
+        }, { once: true });
+
+        testVideo.addEventListener("error", () => {
+          failureCount++;
+          if (failureCount === providers.length && !resolved) {
+            testVideos.forEach(v => v.remove());
+            reject(new Error(`All providers failed for CID ${cid}`));
+          }
+        }, { once: true });
+
+        testVideo.style.display = "none";
+        document.body.appendChild(testVideo);
+
+        // Now set src and trigger load after listeners are attached
+        testVideo.src = url;
+        testVideo.preload = "auto";
+        testVideo.load();
+
+        testVideos.push(testVideo);
+      });
+    });
+  }
