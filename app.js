@@ -1,14 +1,7 @@
 // Refactored and cleaned app.js
 
 // --- Global Constants and Variables --- //
-const PROVIDERS = [
-  "dweb.link",
-  "cloudflare-ipfs.com",
-  "ipfs.io",
-  "cf-ipfs.com",
-  "ipfs.fleek.co",
-  "gateway.pinata.cloud"
-];
+const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
 
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
