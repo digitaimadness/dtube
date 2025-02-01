@@ -23,11 +23,17 @@ offscreenCanvas.height = samplingHeight;
 // Global variables for video loading and buffering state
 let isLoading = false;
 let currentVideoIndex = -1;
+let preloadedNextUrl = null;
+let isPreloadingNext = false;
 let bufferingUpdateScheduled = false;
 
 // Cache references to spinner and progress bar elements
 const spinner = document.getElementById("spinner");
 const progressFilledElem = document.querySelector('.progress-bar');
+
+// Add these constants with other global constants
+const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
+let controlsTimeout = null;
 
 // Shuffle the video sources to randomize the order.
 const videoSources = shuffleArray([
@@ -68,6 +74,9 @@ const videoSources = shuffleArray([
   "bafybeigcltvclgdajfbrjps2e5fuidwaepkfoaj2zze4emxqc7q4k5xjq4",
   "bafybeiavkrub4h54vpnpqzgnakg4g3zxgfo6x4iadbdn5ul3mqu6pb3dfq",
 ]);
+
+// Add global declaration at the top with other globals
+let controlsSystem;  // Add this line with other global variables
 
 // --- Helper Functions --- //
 
@@ -141,22 +150,39 @@ async function loadNextVideo() {
     isLoading = true;
     spinner.style.display = "block";
     video.pause();
-    currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
-    const cid = videoSources[currentVideoIndex];
-    console.log("Attempting to load video with CID:", cid);
-
-    const url = await loadVideoFromCid(cid);
-    video.src = url;
-    console.log("Loaded video URL:", url);
-    video.load();
-
-    try {
-      await video.play();
-    } catch (error) {
-      console.error("Autoplay blocked", error);
+    if (preloadedNextUrl) {
+      // Use preloaded next video
+      currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+      video.src = preloadedNextUrl;
+      console.log('Loaded preloaded video URL:', preloadedNextUrl);
+      preloadedNextUrl = null;
+      video.load();
+      // Start preloading the subsequent video immediately after load
+      preloadNextVideo();
+      try {
+        await video.play();
+      } catch (error) {
+        console.error('Autoplay blocked', error);
+      }
+    } else {
+      // Fallback to original loading if no preloaded video
+      currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+      const cid = videoSources[currentVideoIndex];
+      console.log('Attempting to load video with CID:', cid);
+      const url = await loadVideoFromCid(cid);
+      video.src = url;
+      console.log('Loaded video URL:', url);
+      video.load();
+      // Preload next video immediately after successful load
+      preloadNextVideo();
+      try {
+        await video.play();
+      } catch (error) {
+        console.error('Autoplay blocked', error);
+      }
     }
   } catch (error) {
-    console.error("Error loading video:", error);
+    console.error('Error loading video:', error);
   } finally {
     isLoading = false;
     spinner.style.display = "none";
@@ -259,11 +285,11 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.controls.secsSeek(-15, clickPos);
-        this.controls.showGesturePopup("Rewind 15s", clickPos);
+        this.controls.ui.showGesturePopup("Rewind 15s", clickPos);
         break;
       case 3: 
         loadPreviousVideo();
-        this.controls.showGesturePopup("Previous Video", clickPos);
+        this.controls.ui.showGesturePopup("Previous Video", clickPos);
         break;
     }
   }
@@ -275,11 +301,11 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.controls.secsSeek(15, clickPos);
-        this.controls.showGesturePopup("Forward 15s", clickPos);
+        this.controls.ui.showGesturePopup("Forward 15s", clickPos);
         break;
       case 3:
         loadNextVideo();
-        this.controls.showGesturePopup("Next Video", clickPos);
+        this.controls.ui.showGesturePopup("Next Video", clickPos);
         break;
     }
   }
@@ -330,20 +356,170 @@ class FrameAnalyzer {
   }
 }
 
+// Insert UIManager class after FrameAnalyzer class
+
+class UIManager {
+  constructor() {
+    this.progressContainer = document.querySelector('.progress-container');
+    this.progressBar = document.querySelector('.progress-bar');
+    this.bufferBar = document.querySelector('.buffer-bar');
+    this.timestampPopup = document.createElement('div');
+    this.timestampPopup.className = 'timestamp-popup';
+    this.progressContainer.appendChild(this.timestampPopup);
+    // Optimize the timecode popup rendering with will-change
+    this.timestampPopup.style.willChange = 'left, transform, opacity';
+    this.gesturePopup = document.getElementById('gesturePopup');
+    this.cachedRect = null;
+    this.progressContainer.addEventListener('pointerenter', () => {
+      this.cachedRect = this.progressContainer.getBoundingClientRect();
+    });
+    this.progressContainer.addEventListener('pointerleave', () => {
+      this.cachedRect = null;
+    });
+    // Add caching for last popup update to reduce unnecessary DOM updates
+    this.lastPopupOffsetX = null;
+    this.lastPopupText = null;
+    if (this.gesturePopup) {
+      this.gesturePopup.style.willChange = 'transform, opacity';
+    }
+    if (this.progressBar) {
+      this.progressBar.style.willChange = 'width, background-color';
+    }
+    if (this.bufferBar) {
+      this.bufferBar.style.willChange = 'width, background-color';
+    }
+    window.addEventListener('resize', () => {
+      if (this.cachedRect) {
+        this.cachedRect = this.progressContainer.getBoundingClientRect();
+      }
+    });
+    this.controlsVisible = true;
+    this.progressContainer.style.transition = 'opacity 0.3s ease';
+
+    // Add background element
+    this.progressBackground = document.createElement('div');
+    this.progressBackground.className = 'progress-background';
+    this.progressContainer.insertBefore(this.progressBackground, this.progressBar);
+    
+    // Add CSS transitions for background
+    this.progressBackground.style.transition = 'background-color 0.5s ease';
+  }
+  updateBufferBar(video) {
+    if (!video.duration) {
+      if (this.bufferBar) {
+        this.bufferBar.style.width = "0%";
+        this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+      }
+      return;
+    }
+    let bufferedPercentage = 0;
+    if (video.buffered.length > 0) {
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      bufferedPercentage = (bufferedEnd / video.duration) * 100;
+    }
+    if (this.bufferBar) {
+      this.bufferBar.style.width = bufferedPercentage + '%';
+      this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    }
+  }
+  updatePlaybackProgress(video) {
+    if (!video.duration) return;
+    const percent = (video.currentTime / video.duration) * 100;
+    if (this.progressBar) {
+      this.progressBar.style.width = percent + '%';
+    }
+  }
+  updateProgressBarColor(hue) {
+    if (this.progressBar) {
+      this.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+      // Update background with matching hue but lower saturation/lightness
+      this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
+    }
+  }
+  updateTimestampPopupPreview(video, clientX) {
+    const rect = this.cachedRect || this.progressContainer.getBoundingClientRect();
+    let offsetX = clientX - rect.left;
+    offsetX = Math.max(0, Math.min(offsetX, rect.width));
+    const percent = offsetX / rect.width;
+    // Handle undefined/zero duration case explicitly
+    const popupText = video.duration && video.duration > 0 ? formatTime(percent * video.duration) : "0:00";
+
+    // Only update the popup if the value has changed significantly
+    if (this.lastPopupOffsetX !== null && Math.abs(offsetX - this.lastPopupOffsetX) < 1 && this.lastPopupText === popupText) {
+      return;
+    }
+    this.lastPopupOffsetX = offsetX;
+    this.lastPopupText = popupText;
+
+    // Calculate popup boundaries
+    const popupWidth = this.timestampPopup.offsetWidth;
+    const containerWidth = rect.width;
+    
+    // Ensure popup stays within container bounds
+    const minX = popupWidth / 2;
+    const maxX = containerWidth - popupWidth / 2;
+    offsetX = Math.max(minX, Math.min(offsetX, maxX));
+
+    this.timestampPopup.textContent = popupText;
+    this.timestampPopup.style.left = `${offsetX}px`;
+    this.timestampPopup.style.transform = 'translateX(-50%)';
+    this.timestampPopup.style.display = 'block';
+  }
+  hideTimestampPopup() {
+    this.timestampPopup.style.display = 'none';
+  }
+  showGesturePopup(message, clickPos) {
+    const gp = this.gesturePopup;
+    if (!gp) return;
+    if (this.hideTimeout) {
+      clearTimeout(this.hideTimeout);
+      this.hideTimeout = null;
+    }
+    gp.style.display = 'flex';
+    gp.style.opacity = '0';
+    gp.style.transform = 'translate(-50%, -50%) scale(0)';
+    gp.style.transition = 'opacity 300ms ease, transform 300ms ease';
+    gp.offsetHeight; // trigger reflow
+    gp.textContent = message;
+    const posX = clickPos?.x ?? window.innerWidth/2;
+    const posY = clickPos?.y ?? window.innerHeight/2;
+    gp.style.left = `${posX}px`;
+    gp.style.top = `${posY}px`;
+    requestAnimationFrame(() => {
+      gp.style.opacity = '1';
+      gp.style.transform = 'translate(-50%, -50%) scale(1)';
+    });
+    this.hideTimeout = setTimeout(() => {
+      gp.style.opacity = '0';
+      gp.style.transform = 'translate(-50%, -50%) scale(0)';
+      this.hideTimeout = setTimeout(() => {
+        gp.style.display = 'none';
+        this.hideTimeout = null;
+      }, 300);
+    }, 1000);
+  }
+  showControls() {
+    if (!this.controlsVisible) {
+      this.progressContainer.style.opacity = '1';
+      this.controlsVisible = true;
+    }
+    this.progressContainer.classList.add('active');
+  }
+  hideControls() {
+    if (this.controlsVisible && !video.paused && !controlsSystem.isDragging) {
+      this.progressContainer.style.opacity = '0';
+      this.controlsVisible = false;
+    }
+    this.progressContainer.classList.remove('active');
+  }
+}
+
 // --- Controls System Optimizations --- //
 class ControlsSystem {
   constructor(video) {
     this.video = video;
-    this.progressContainer = document.querySelector('.progress-container');
-    this.progressBar = document.querySelector('.progress-bar');
-    this.bufferBar = document.querySelector('.buffer-bar');
-    // Create a timestamp popup element and add it to the progress container
-    this.timestampPopup = document.createElement('div');
-    this.timestampPopup.className = 'timestamp-popup';
-    this.progressContainer.appendChild(this.timestampPopup);
-    // Cache the gesture popup element (defined in index.html)
-    this.gesturePopup = document.getElementById('gesturePopup');
-    // Cache the interaction zones
+    this.ui = new UIManager();
+    // Cache interaction zones
     this.leftZone = document.querySelector('.zone.left-zone');
     this.centerZone = document.querySelector('.zone.center-zone');
     this.rightZone = document.querySelector('.zone.right-zone');
@@ -357,39 +533,49 @@ class ControlsSystem {
     this.HUE_UPDATE_INTERVAL = 500; // Update hue every 500ms
     this.multiTapState = {};
     this.arrowTimeout = null;
+    this.initActivityMonitoring();
   }
   
   initInteractions() {
-    this.progressContainer.addEventListener('pointerenter', (e) => {
-      this.updateTimestampPopupPreview(e.clientX);
-      this.timestampPopup.style.display = 'block';
+    this.ui.progressContainer.addEventListener('pointerenter', (e) => {
+      this.ui.updateTimestampPopupPreview(this.video, e.clientX);
     });
-    this.progressContainer.addEventListener('pointermove', (e) => {
-      this.updateTimestampPopupPreview(e.clientX);
+    
+    const throttledPointerMove = throttle((e) => {
+      this.ui.updateTimestampPopupPreview(this.video, e.clientX);
       if (this.isDragging) {
         this.seek(e.clientX);
       }
-    });
-    this.progressContainer.addEventListener('pointerdown', (e) => {
+    }, 100);
+
+    // Unified pointer event handling for all devices
+    this.ui.progressContainer.addEventListener('pointermove', throttledPointerMove);
+    
+    const pointerDownHandler = (e) => {
+      e.preventDefault();
       this.isDragging = true;
-      this.progressContainer.classList.add("active");
-      this.progressContainer.setPointerCapture(e.pointerId);
+      this.ui.showControls();
+      this.ui.progressContainer.setPointerCapture(e.pointerId);
       this.seek(e.clientX);
-      this.timestampPopup.style.display = 'block';
-    });
-    const pointerUpCancel = (e) => {
+      this.ui.timestampPopup.style.display = 'block';
+    };
+
+    const pointerUpHandler = (e) => {
       if (this.isDragging) {
         this.seek(e.clientX);
         this.isDragging = false;
-        this.progressContainer.classList.remove("active");
-        this.progressContainer.releasePointerCapture(e.pointerId);
-        this.timestampPopup.style.display = 'none';
+        this.ui.progressContainer.classList.remove("active");
+        this.ui.progressContainer.releasePointerCapture(e.pointerId);
+        this.ui.hideTimestampPopup();
       }
     };
-    this.progressContainer.addEventListener('pointerup', pointerUpCancel);
-    this.progressContainer.addEventListener('pointercancel', pointerUpCancel);
-    this.progressContainer.addEventListener('pointerleave', (e) => {
-      this.timestampPopup.style.display = 'none';
+
+    // Use same handlers for all pointer types
+    this.ui.progressContainer.addEventListener('pointerdown', pointerDownHandler);
+    this.ui.progressContainer.addEventListener('pointerup', pointerUpHandler);
+    this.ui.progressContainer.addEventListener('pointercancel', pointerUpHandler);
+    this.ui.progressContainer.addEventListener('pointerleave', (e) => {
+      this.ui.hideTimestampPopup();
     });
   }
   
@@ -404,143 +590,32 @@ class ControlsSystem {
   
   // Helper: Toggle play/pause of the video.
   togglePlayPause(clickPos) {
-    // If no click position is provided (e.g. from keypress), default to the viewport center.
+    this.resetControlsTimeout();
     if (!clickPos) {
       clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     }
-
     if (this.video.paused) {
       this.video.play().then(() => {
-        this.showGesturePopup("Play", clickPos);
+        this.ui.showGesturePopup("Play", clickPos);
       }).catch(err => {
         console.error("Error playing video:", err);
-        // In case of an error, still display the popup.
-        this.showGesturePopup("Play", clickPos);
+        this.ui.showGesturePopup("Play", clickPos);
       });
     } else {
       this.video.pause();
-      this.showGesturePopup("Pause", clickPos);
+      this.ui.showGesturePopup("Pause", clickPos);
     }
-  }
-  
-  // Helper: Show a gesture popup with a message.
-  // This method applies the same out-of-bound handling for popups whether the gesture originates
-  // from a tap or a keyboard event. If the desired position would place the popup outside the viewport,
-  // the position is averaged with the viewport center.
-  showGesturePopup(message, clickPos) {
-    const gp = this.gesturePopup;
-    if (!gp) return;
-
-    if (this.hideTimeout) {
-        clearTimeout(this.hideTimeout);
-        this.hideTimeout = null;
-    }
-
-    // Reset to initial state with scale 0
-    gp.style.display = 'flex';
-    gp.style.opacity = '0';
-    gp.style.transform = 'translate(-50%, -50%) scale(0)';
-    
-    gp.offsetHeight; // Trigger reflow
-
-    gp.textContent = message;
-
-    const posX = clickPos?.x ?? window.innerWidth/2;
-    const posY = clickPos?.y ?? window.innerHeight/2;
-
-    gp.style.left = `${posX}px`;
-    gp.style.top = `${posY}px`;
-
-    requestAnimationFrame(() => {
-        // Animate in with scale up
-        gp.style.opacity = '1';
-        gp.style.transform = 'translate(-50%, -50%) scale(1)';
-    });
-
-    this.hideTimeout = setTimeout(() => {
-        // Animate out with scale down
-        gp.style.opacity = '0';
-        gp.style.transform = 'translate(-50%, -50%) scale(0)';
-        this.hideTimeout = setTimeout(() => {
-            gp.style.display = 'none';
-            this.hideTimeout = null;
-        }, 300); // Match transition duration
-    }, 1000);
-  }
-  
-  updateBufferBar() {
-    if (!this.video.duration) {
-      if (this.bufferBar) {
-        this.bufferBar.style.width = "0%";
-        this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-      }
-      return;
-    }
-    let bufferedPercentage = 0;
-    if (this.video.buffered.length > 0) {
-      const bufferedEnd = this.video.buffered.end(this.video.buffered.length - 1);
-      bufferedPercentage = (bufferedEnd / this.video.duration) * 100;
-    }
-    if (this.bufferBar) {
-      this.bufferBar.style.width = bufferedPercentage + '%';
-      this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-    }
-  }
-  
-  updatePlaybackProgress() {
-    if (!this.video.duration) return;
-    const percent = (this.video.currentTime / this.video.duration) * 100;
-    if (this.progressBar) {
-      this.progressBar.style.width = percent + '%';
-    }
-  }
-  
-  updateProgressBarColor() {
-    if (this.video.paused || this.video.readyState < 2) return;
-    const hue = this.frameAnalyzer.getDominantHue(this.video);
-    this.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
-  }
-  
-  updateTimestampPopupPreview(clientX) {
-    const rect = this.progressContainer.getBoundingClientRect();
-    let offsetX = clientX - rect.left;
-    offsetX = Math.max(0, Math.min(offsetX, rect.width));
-    const percent = offsetX / rect.width;
-    
-    if (this.video.duration) {
-      this.timestampPopup.textContent = formatTime(percent * this.video.duration);
-    } else {
-      this.timestampPopup.textContent = "0:00";
-    }
-    
-    // Apply boundary constraints
-    const popupWidth = this.timestampPopup.offsetWidth;
-    const maxLeft = rect.width - popupWidth;
-    offsetX = Math.max(0, Math.min(offsetX - popupWidth/2, maxLeft));
-    
-    this.timestampPopup.style.left = `${offsetX}px`;
-    this.timestampPopup.style.display = 'block';
-  }
-  
-  seek(clientX) {
-    const rect = this.progressContainer.getBoundingClientRect();
-    let offsetX = clientX - rect.left;
-    offsetX = Math.max(0, Math.min(offsetX, rect.width));
-    const percent = offsetX / rect.width;
-    if (this.video.duration) {
-      this.video.currentTime = percent * this.video.duration;
-    }
-    this.updatePlaybackProgress();
   }
   
   updateAll() {
-    this.updateBufferBar();
-    this.updatePlaybackProgress();
-    
-    // Throttle hue updates
+    this.ui.updateBufferBar(this.video);
+    this.ui.updatePlaybackProgress(this.video);
     const now = Date.now();
     if (now - this.lastHueUpdate >= this.HUE_UPDATE_INTERVAL) {
-      this.updateProgressBarColor();
+      if (!this.video.paused && this.video.readyState >= 2) {
+        const hue = this.frameAnalyzer.getDominantHue(this.video);
+        this.ui.updateProgressBarColor(hue);
+      }
       this.lastHueUpdate = now;
     }
   }
@@ -551,6 +626,7 @@ class ControlsSystem {
   }
 
   handleKeyPress(e) {
+    this.resetControlsTimeout();
     if (e.repeat) return;
     
     const keyActions = {
@@ -588,10 +664,10 @@ class ControlsSystem {
       // Handle double tap
       if (direction === 'right') {
         loadNextVideo();
-        this.showGesturePopup("Next Video", positions.right);
+        this.ui.showGesturePopup("Next Video", positions.right);
       } else {
         loadPreviousVideo();
-        this.showGesturePopup("Previous Video", positions.left);
+        this.ui.showGesturePopup("Previous Video", positions.left);
       }
       this.multiTapState[direction] = 0;
     } else {
@@ -599,7 +675,7 @@ class ControlsSystem {
       this.arrowTimeout = setTimeout(() => {
         const seconds = direction === 'right' ? 15 : -15;
         this.secsSeek(seconds);
-        this.showGesturePopup(
+        this.ui.showGesturePopup(
           `${direction === 'right' ? 'Forward' : 'Rewind'} 15s`,
           positions[direction]
         );
@@ -613,7 +689,7 @@ class ControlsSystem {
     const position = change > 0 
       ? { x: window.innerWidth / 2, y: 100 }
       : { x: window.innerWidth / 2, y: window.innerHeight - 100 };
-    this.showGesturePopup(
+    this.ui.showGesturePopup(
       this.video.volume === (change > 0 ? 1 : 0) 
         ? `Volume ${change > 0 ? 'Max' : 'Min'}`
         : `Volume ${change > 0 ? '+' : '-'}`,
@@ -623,7 +699,7 @@ class ControlsSystem {
 
   // Helper: Toggle fullscreen mode.
   toggleFullscreen(clickPos) {
-    // If no click position is provided (e.g. from keypress), default to the viewport center.
+    this.resetControlsTimeout();
     if (!clickPos) {
       clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     }
@@ -632,22 +708,51 @@ class ControlsSystem {
     if (!document.fullscreenElement) {
       if (wrapper) {
         wrapper.requestFullscreen().then(() => {
-          this.showGesturePopup("Fullscreen", clickPos);
+          this.ui.showGesturePopup("Fullscreen", clickPos);
         }).catch(err => {
           console.error(`Error attempting fullscreen: ${err.message}`);
-          this.showGesturePopup("Fullscreen", clickPos);
+          this.ui.showGesturePopup("Fullscreen", clickPos);
         });
       } else {
         console.error("Video wrapper not found.");
       }
     } else {
       document.exitFullscreen().then(() => {
-        this.showGesturePopup("Windowed", clickPos);
+        this.ui.showGesturePopup("Windowed", clickPos);
       }).catch(err => {
         console.error(`Error exiting fullscreen: ${err.message}`);
-        this.showGesturePopup("Windowed", clickPos);
+        this.ui.showGesturePopup("Windowed", clickPos);
       });
     }
+  }
+
+  seek(clientX) {
+    this.resetControlsTimeout();
+    const rect = this.ui.progressContainer.getBoundingClientRect();
+    let offsetX = clientX - rect.left;
+    offsetX = Math.max(0, Math.min(offsetX, rect.width));
+    const percent = offsetX / rect.width;
+    if (this.video.duration) {
+      this.video.currentTime = percent * this.video.duration;
+    }
+    this.ui.updatePlaybackProgress(this.video);
+  }
+
+  initActivityMonitoring() {
+    const activityEvents = ['mousemove', 'click', 'touchstart', 'keydown'];
+    activityEvents.forEach(event => {
+      document.addEventListener(event, () => {
+        this.ui.showControls();
+        this.resetControlsTimeout();
+      }, { passive: true });
+    });
+  }
+
+  resetControlsTimeout() {
+    clearTimeout(controlsTimeout);
+    controlsTimeout = setTimeout(() => {
+      this.ui.hideControls();
+    }, CONTROLS_TIMEOUT);
   }
 }
 
@@ -656,10 +761,10 @@ function registerVideoEventListeners() {
   // Buffering and additional video events.
   video.addEventListener("progress", () => {
     // Buffer bar updates will be handled by the ControlsSystem instance.
-    controlsSystem && controlsSystem.updateBufferBar();
+    controlsSystem && controlsSystem.updateAll();
   }, { passive: true });
   video.addEventListener("loadedmetadata", () => {
-    controlsSystem && controlsSystem.updateBufferBar();
+    controlsSystem && controlsSystem.updateAll();
   }, { passive: true });
   // Note: timeupdate events will be handled below after instantiating the ControlsSystem.
 }
@@ -667,8 +772,8 @@ function registerVideoEventListeners() {
 // --- Update main() to instantiate ControlsSystem --- //
 async function main() {
   registerVideoEventListeners();
-  // Instantiate the unified controls system.
-  const controlsSystem = new ControlsSystem(video);
+  // Properly uses the globally declared variable
+  controlsSystem = new ControlsSystem(video);
 
   // Forward timeupdate events to update the controls system.
   function updateProgress() {
@@ -773,3 +878,43 @@ document.addEventListener('visibilitychange', () => {
     video.play();
   }
 });
+
+function throttle(func, limit) {
+  let lastCall = 0;
+  let timeoutId;
+  return function(...args) {
+    const now = Date.now();
+    const remaining = limit - (now - lastCall);
+    
+    if (remaining <= 0) {
+      // Execute immediately and reset timer
+      func.apply(this, args);
+      lastCall = now;
+    } else {
+      // Clear any existing timeout and schedule new execution
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        func.apply(this, args);
+        lastCall = Date.now();
+      }, remaining);
+    }
+  };
+}
+
+// Insert preloadNextVideo function after loadPreviousVideo function (or after loadNextVideo) near its definition
+async function preloadNextVideo() {
+  if (isPreloadingNext || videoSources.length === 0) return;
+  isPreloadingNext = true;
+  const nextIndex = (currentVideoIndex + 1) % videoSources.length;
+  const cid = videoSources[nextIndex];
+  try {
+    const url = await loadVideoFromCid(cid);
+    preloadedNextUrl = url;
+    console.log('Preloaded next video URL:', url);
+  } catch (error) {
+    console.error('Preloading next video failed:', error);
+    preloadedNextUrl = null;
+  } finally {
+    isPreloadingNext = false;
+  }
+}

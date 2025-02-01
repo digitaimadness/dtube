@@ -98,6 +98,7 @@ body {
 
 /* Progress container */
 .progress-container {
+  touch-action: none;
   position: relative;
   flex: 1;
   height: 7px;
@@ -105,7 +106,7 @@ body {
   overflow: visible;
   margin: 0;
   cursor: pointer;
-  transition: height 0.2s ease;
+  transition: opacity 0.3s ease, height 0.2s ease;
 }
 
 /* Grouped hover/active rules for progress-container */
@@ -124,6 +125,7 @@ body {
   top: 0;
   left: 0;
   pointer-events: none;
+  z-index: 0;
 }
 
 /* Progress bar */
@@ -137,6 +139,19 @@ body {
   z-index: 2;
   transition: width 0.3s ease;
   pointer-events: none;
+}
+
+/* Add after existing .progress-bar styles */
+.progress-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background-color: transparent;
+  border-radius: 2px;
+  transition: none; /* Parent container handles transitions */
 }
 
 /* Timestamp popup for progress container */
@@ -191,15 +206,17 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   padding: 20px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  background-color: #fff;
+  color: #000 !important;  /* Force text color to stay black */
   font-size: 1rem;
   text-align: center;
   border-radius: 8px;
   z-index: 1000;
-  display: inline-block;
+  display: none;
   box-sizing: border-box;
   word-wrap: break-word;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  max-width: 80%;
 }
 .popup.active {
   display: inline-block;
@@ -255,12 +272,11 @@ body {
   #controls {
     height: 80px;
     padding: 16px;
+    touch-action: manipulation;
   }
-
-  .progress-container,
-  .progress-bar,
-  .buffer-bar {
-    height: 15px;
+  
+  .progress-container {
+    height: 15px !important;
   }
 
   /* Optionally enlarge text within controls */
@@ -292,19 +308,16 @@ body {
 }
 
 /* Popup Message Box Styles */
-.popup {
-  background-color: #fff;
-  color: #000;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  font-size: 1rem;
-  max-width: 80%;
-  text-align: center;
-}
-
 #gesturePopup {
     transition: 
         opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
         transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Update z-indexes for proper layering */
+.buffer-bar {
+  z-index: 0;
+}
+.progress-bar {
+  z-index: 2;
 }
