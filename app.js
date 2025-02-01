@@ -2,11 +2,12 @@
 
 // --- Global Constants and Variables --- //
 const PROVIDERS = [
-  "io",
-  "algonode.xyz",
-  "eth.aragon.network",
   "dweb.link",
-  "flk-ipfs.xyz",
+  "cloudflare-ipfs.com",
+  "ipfs.io",
+  "cf-ipfs.com",
+  "ipfs.fleek.co",
+  "gateway.pinata.cloud"
 ];
 
 const video = document.getElementById("videoPlayer");
@@ -33,47 +34,12 @@ const progressFilledElem = document.querySelector('.progress-bar');
 
 // Add these constants with other global constants
 const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
-let controlsTimeout = null;
 
-// Shuffle the video sources to randomize the order.
-const videoSources = shuffleArray([
-  "bafybeigtfhi5ws6lrveafsnwsryzwundiqal3iiwpo3ytmoxgv5hsp7mou",
-  "bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu",
-  "bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq",
-  "bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e",
-  "bafybeidl2t566mip6tsmx2lbfxiydbvcdglq5qnkpdvrkje2uqxyf6rjom",
-  "bafybeibvmhfd4mnnyqv2zf3l22wndpzrgoficslxxtktmhdpbtzq72wm3u",
-  "bafybeicqxewkc5btmz44bdc6spe3s4yrfpjzuhbga2y6vydnsib4z3lsgq",
-  "bafybeiboxgm6xlz5arh6lhzbpowc6gtscshrwsnj6dkrffzuqpk7n3an4q",
-  "bafybeieadukgtpiyyo46xje34hmd3k4nyqphihi3uuvntrkvjjliqbixze",
-  "bafybeicwq3gxtay7xgc7dxfd3oda5o6ypebyrrav5sm7w4blqt5pdl4fbi",
-  "bafybeidcpcb3ksqsomth3dyumfa6umdhye7cre75sn6jl2fyba5tymapl4",
-  "bafybeichqv6feek6txormpcxenwnsnv3gswohyp3zc4zlrnyxg5bavnmim",
-  "bafybeigm5vud4d6jvsma2kgcgw3phjoimvrwdyisjoxezh4qj7kff2vf24",
-  "bafybeid6hz6f3yokuzo3cdotvck4d43avol3pfw3wccx6bzprpch5hvvwu",
-  "bafybeidkpopiwmpxkilx4llay354dpqdndqzv7pzc6oyffziolskdfftfm",
-  "bafybeifrh25cck2yue5yeesdzqlfh3p7mz7e7vkvfini5vdjtjosq7epxi",
-  "bafybeigqvv5fjoi2jpyvhpxzqcuadd2fpqio56sukmcckig6di2tg7rv7q",
-  "bafybeifkoazphnc4fzeaf6b6wnhbvuscsbvj54tn5h565alhm2mjdtedii",
-  "bafybeicqw4jgftp3rnmke2ixvb3auukeaauymj6y3g4b552sxvvf6adygm",
-  "bafybeie2y67hpmxoxpxkdez3veezjj6rchn4vi5ckoy7ngysn34w3h34w4",
-  "bafybeiczqttpr664lwktlcmrzvwr6oeemwn5howixjxynkorapjw7t7jze",
-  "bafybeidcddfku264l3gqb4sdi3qwyrbrwulzg5qpbpvfpslbkyqwl5p2yy",
-  "bafybeihiwcl42ukgcn3e3pszu46da2fbnn2xatyjqofyyeahfgu362wysq",
-  "bafybeia7kqdwptsbetoj4gy5a73lohyuokudurijzmarq247uzveiegenu",
-  "bafybeigdpqir5ehfqyuhmctcwkxoqchhbbrrgp6aj76pb3y7b2ot4mm4dq",
-  "bafybeihb27cory76wmbm3n5gwuu2yiluyuuhpomot54gsfdszewix7eycm",
-  "bafybeibob3v7y7aiuzksield65oybwtvhraorte34i5hqknmkdoxv4klae",
-  "bafybeigdqsp2qfsf7cmhqjw72qt4wjrhr5irp637wyeiyd3jp75uyeq6ey",
-  "bafybeihjurlpa2ztfy7cia6fxr7cj225rojhxapuj2rtvkruot7skabymy",
-  "bafybeidcs2frwxv2h2wpv526iibe3vlbm2wo7fvjzqpm5o3oq32hkqlwte",
-  "bafybeid4yjs2hx7gjgottu4gktznbbwgqixa7yve7epdrqxro6g7qig2gm",
-  "bafybeihsi46l5f7pfqgrj4ldmm6nqjjfmx4ryg4pq6ornzibsgscpqtjau",
-  "bafybeickclgl4lf2rc226ah4ltnweobtvzhhndl6y5lte2ibvcukwdigfm",
-  "bafybeiauuuk26dbi6hp3grb7xinajiwbwrlxhxh6pgg76bygewfiix7gka",
-  "bafybeigcltvclgdajfbrjps2e5fuidwaepkfoaj2zze4emxqc7q4k5xjq4",
-  "bafybeiavkrub4h54vpnpqzgnakg4g3zxgfo6x4iadbdn5ul3mqu6pb3dfq",
-]);
+// Import video sources
+import videoSourcesImport from './videoSources.js';
+
+// Replace the original import and redeclaration
+const videoSources = shuffleArray(videoSourcesImport);
 
 // Add global declaration at the top with other globals
 let controlsSystem;  // Add this line with other global variables
@@ -150,39 +116,49 @@ async function loadNextVideo() {
     isLoading = true;
     spinner.style.display = "block";
     video.pause();
+    
+    // Clear existing source and force garbage collection
+    video.src = "";
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
     if (preloadedNextUrl) {
-      // Use preloaded next video
       currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
       video.src = preloadedNextUrl;
       console.log('Loaded preloaded video URL:', preloadedNextUrl);
+      
+      // Warm up the buffer
+      video.preload = "auto";
+      await video.play();
+      video.pause();
+      
       preloadedNextUrl = null;
-      video.load();
-      // Start preloading the subsequent video immediately after load
-      preloadNextVideo();
-      try {
-        await video.play();
-      } catch (error) {
-        console.error('Autoplay blocked', error);
-      }
     } else {
-      // Fallback to original loading if no preloaded video
       currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
       const cid = videoSources[currentVideoIndex];
       console.log('Attempting to load video with CID:', cid);
       const url = await loadVideoFromCid(cid);
+      
       video.src = url;
       console.log('Loaded video URL:', url);
-      video.load();
-      // Preload next video immediately after successful load
+      
+      // Wait for enough data to play
+      await new Promise((resolve) => {
+        video.addEventListener('canplaythrough', resolve, { once: true });
+      });
+    }
+
+    // Start playback with better buffering handling
+    try {
+      await video.play();
+      // Start preloading next video after successful playback
       preloadNextVideo();
-      try {
-        await video.play();
-      } catch (error) {
-        console.error('Autoplay blocked', error);
-      }
+    } catch (error) {
+      console.error('Autoplay blocked', error);
     }
   } catch (error) {
     console.error('Error loading video:', error);
+    // Skip to next video on error
+    loadNextVideo();
   } finally {
     isLoading = false;
     spinner.style.display = "none";
@@ -245,15 +221,15 @@ function rgbToHue(r, g, b) {
 
 // --- New Controls and Progress Bar System ---
 class ZoneInteractionHandler {
-  constructor(controlsSystem) {
-    this.controls = controlsSystem;
+  constructor(uiController) {
+    this.ui = uiController;
     this.MULTI_TAP_DELAY = 200;
   }
 
   initialize() {
-    this.setupZone(this.controls.leftZone, this.handleLeftZoneClick.bind(this));
-    this.setupZone(this.controls.rightZone, this.handleRightZoneClick.bind(this));
-    this.setupZone(this.controls.centerZone, this.handleCenterZoneClick.bind(this));
+    this.setupZone(this.ui.controls.leftZone, this.handleLeftZoneClick.bind(this));
+    this.setupZone(this.ui.controls.rightZone, this.handleRightZoneClick.bind(this));
+    this.setupZone(this.ui.controls.centerZone, this.handleCenterZoneClick.bind(this));
   }
 
   setupZone(zone, handler) {
@@ -281,15 +257,15 @@ class ZoneInteractionHandler {
   handleLeftZoneClick(clickPos, count) {
     switch(count) {
       case 1: 
-        this.controls.togglePlayPause(clickPos); 
+        this.ui.togglePlayPause(clickPos); 
         break;
       case 2: 
-        this.controls.secsSeek(-15, clickPos);
-        this.controls.ui.showGesturePopup("Rewind 15s", clickPos);
+        this.ui.secsSeek(-15);
+        this.ui.showGesturePopup("Rewind 15s", clickPos);
         break;
       case 3: 
         loadPreviousVideo();
-        this.controls.ui.showGesturePopup("Previous Video", clickPos);
+        this.ui.showGesturePopup("Previous Video", clickPos);
         break;
     }
   }
@@ -297,23 +273,23 @@ class ZoneInteractionHandler {
   handleRightZoneClick(clickPos, count) {
     switch(count) {
       case 1: 
-        this.controls.togglePlayPause(clickPos); 
+        this.ui.togglePlayPause(clickPos); 
         break;
       case 2: 
-        this.controls.secsSeek(15, clickPos);
-        this.controls.ui.showGesturePopup("Forward 15s", clickPos);
+        this.ui.secsSeek(15);
+        this.ui.showGesturePopup("Forward 15s", clickPos);
         break;
       case 3:
         loadNextVideo();
-        this.controls.ui.showGesturePopup("Next Video", clickPos);
+        this.ui.showGesturePopup("Next Video", clickPos);
         break;
     }
   }
 
   handleCenterZoneClick(clickPos, count) {
     switch(count) {
-      case 1: this.controls.togglePlayPause(clickPos); break;
-      case 2: this.controls.toggleFullscreen(clickPos); break;
+      case 1: this.ui.togglePlayPause(clickPos); break;
+      case 2: this.ui.toggleFullscreen(clickPos); break;
     }
   }
 }
@@ -358,57 +334,94 @@ class FrameAnalyzer {
 
 // Insert UIManager class after FrameAnalyzer class
 
-class UIManager {
-  constructor() {
-    this.progressContainer = document.querySelector('.progress-container');
-    this.progressBar = document.querySelector('.progress-bar');
-    this.bufferBar = document.querySelector('.buffer-bar');
+class UIController {
+  constructor(video) {
+    this.video = video;
+    this.controlsTimeout = null;
+    this.controls = {
+      progressContainer: document.querySelector('.progress-container'),
+      progressBar: document.querySelector('.progress-bar'),
+      bufferBar: document.querySelector('.buffer-bar'),
+      gesturePopup: document.getElementById('gesturePopup'),
+      leftZone: document.querySelector('.zone.left-zone'),
+      centerZone: document.querySelector('.zone.center-zone'),
+      rightZone: document.querySelector('.zone.right-zone')
+    };
+    
+    this.state = {
+      isDragging: false,
+      controlsVisible: true,
+      cachedRect: null,
+      lastPopupOffsetX: null,
+      lastPopupText: null,
+      multiTapState: {},
+      arrowTimeout: null
+    };
+
+    this.frameAnalyzer = new FrameAnalyzer();
+    this.zoneHandler = new ZoneInteractionHandler(this);
+    this.initializeUI();
+  }
+
+  initializeUI() {
+    this.createTimestampPopup();
+    this.createProgressBackground();
+    this.bindEvents();
+    this.zoneHandler.initialize();
+    this.initKeyBindings();
+    this.initActivityMonitoring();
+  }
+
+  createTimestampPopup() {
     this.timestampPopup = document.createElement('div');
     this.timestampPopup.className = 'timestamp-popup';
-    this.progressContainer.appendChild(this.timestampPopup);
-    // Optimize the timecode popup rendering with will-change
+    this.controls.progressContainer.appendChild(this.timestampPopup);
     this.timestampPopup.style.willChange = 'left, transform, opacity';
-    this.gesturePopup = document.getElementById('gesturePopup');
-    this.cachedRect = null;
-    this.progressContainer.addEventListener('pointerenter', () => {
-      this.cachedRect = this.progressContainer.getBoundingClientRect();
-    });
-    this.progressContainer.addEventListener('pointerleave', () => {
-      this.cachedRect = null;
-    });
-    // Add caching for last popup update to reduce unnecessary DOM updates
-    this.lastPopupOffsetX = null;
-    this.lastPopupText = null;
-    if (this.gesturePopup) {
-      this.gesturePopup.style.willChange = 'transform, opacity';
-    }
-    if (this.progressBar) {
-      this.progressBar.style.willChange = 'width, background-color';
-    }
-    if (this.bufferBar) {
-      this.bufferBar.style.willChange = 'width, background-color';
-    }
-    window.addEventListener('resize', () => {
-      if (this.cachedRect) {
-        this.cachedRect = this.progressContainer.getBoundingClientRect();
-      }
-    });
-    this.controlsVisible = true;
-    this.progressContainer.style.transition = 'opacity 0.3s ease';
+  }
 
-    // Add background element
+  createProgressBackground() {
     this.progressBackground = document.createElement('div');
     this.progressBackground.className = 'progress-background';
-    this.progressContainer.insertBefore(this.progressBackground, this.progressBar);
-    
-    // Add CSS transitions for background
+    this.controls.progressContainer.insertBefore(
+      this.progressBackground, 
+      this.controls.progressBar
+    );
     this.progressBackground.style.transition = 'background-color 0.5s ease';
   }
+
+  bindEvents() {
+    // Progress container events
+    this.controls.progressContainer.addEventListener('pointerenter', () => {
+      this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
+    });
+
+    this.controls.progressContainer.addEventListener('pointerleave', () => {
+      this.state.cachedRect = null;
+    });
+
+    window.addEventListener('resize', () => {
+      if (this.state.cachedRect) {
+        this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
+      }
+    });
+
+    // Pointer events
+    const throttledPointerMove = throttle((e) => {
+      this.updateTimestampPopupPreview(e.clientX);
+      if (this.state.isDragging) this.seek(e.clientX);
+    }, 100);
+
+    this.controls.progressContainer.addEventListener('pointermove', throttledPointerMove);
+    this.controls.progressContainer.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
+    this.controls.progressContainer.addEventListener('pointerup', (e) => this.handlePointerUp(e));
+    this.controls.progressContainer.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
+  }
+
   updateBufferBar(video) {
     if (!video.duration) {
-      if (this.bufferBar) {
-        this.bufferBar.style.width = "0%";
-        this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+      if (this.controls.bufferBar) {
+        this.controls.bufferBar.style.width = "0%";
+        this.controls.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
       }
       return;
     }
@@ -417,27 +430,30 @@ class UIManager {
       const bufferedEnd = video.buffered.end(video.buffered.length - 1);
       bufferedPercentage = (bufferedEnd / video.duration) * 100;
     }
-    if (this.bufferBar) {
-      this.bufferBar.style.width = bufferedPercentage + '%';
-      this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    if (this.controls.bufferBar) {
+      this.controls.bufferBar.style.width = bufferedPercentage + '%';
+      this.controls.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
     }
   }
+
   updatePlaybackProgress(video) {
     if (!video.duration) return;
     const percent = (video.currentTime / video.duration) * 100;
-    if (this.progressBar) {
-      this.progressBar.style.width = percent + '%';
+    if (this.controls.progressBar) {
+      this.controls.progressBar.style.width = percent + '%';
     }
   }
+
   updateProgressBarColor(hue) {
-    if (this.progressBar) {
-      this.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+    if (this.controls.progressBar) {
+      this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
       // Update background with matching hue but lower saturation/lightness
       this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
     }
   }
+
   updateTimestampPopupPreview(video, clientX) {
-    const rect = this.cachedRect || this.progressContainer.getBoundingClientRect();
+    const rect = this.state.cachedRect || this.controls.progressContainer.getBoundingClientRect();
     let offsetX = clientX - rect.left;
     offsetX = Math.max(0, Math.min(offsetX, rect.width));
     const percent = offsetX / rect.width;
@@ -445,11 +461,11 @@ class UIManager {
     const popupText = video.duration && video.duration > 0 ? formatTime(percent * video.duration) : "0:00";
 
     // Only update the popup if the value has changed significantly
-    if (this.lastPopupOffsetX !== null && Math.abs(offsetX - this.lastPopupOffsetX) < 1 && this.lastPopupText === popupText) {
+    if (this.state.lastPopupOffsetX !== null && Math.abs(offsetX - this.state.lastPopupOffsetX) < 1 && this.state.lastPopupText === popupText) {
       return;
     }
-    this.lastPopupOffsetX = offsetX;
-    this.lastPopupText = popupText;
+    this.state.lastPopupOffsetX = offsetX;
+    this.state.lastPopupText = popupText;
 
     // Calculate popup boundaries
     const popupWidth = this.timestampPopup.offsetWidth;
@@ -465,11 +481,13 @@ class UIManager {
     this.timestampPopup.style.transform = 'translateX(-50%)';
     this.timestampPopup.style.display = 'block';
   }
+
   hideTimestampPopup() {
     this.timestampPopup.style.display = 'none';
   }
+
   showGesturePopup(message, clickPos) {
-    const gp = this.gesturePopup;
+    const gp = this.controls.gesturePopup;
     if (!gp) return;
     if (this.hideTimeout) {
       clearTimeout(this.hideTimeout);
@@ -498,129 +516,42 @@ class UIManager {
       }, 300);
     }, 1000);
   }
+
   showControls() {
-    if (!this.controlsVisible) {
-      this.progressContainer.style.opacity = '1';
-      this.controlsVisible = true;
+    const controlsEl = document.getElementById('controls');
+    if (controlsEl) {
+      controlsEl.style.opacity = '1';
+      controlsEl.style.pointerEvents = 'auto';
     }
-    this.progressContainer.classList.add('active');
-  }
-  hideControls() {
-    if (this.controlsVisible && !video.paused && !controlsSystem.isDragging) {
-      this.progressContainer.style.opacity = '0';
-      this.controlsVisible = false;
+    if (this.controls.gesturePopup) {
+      this.controls.gesturePopup.style.display = 'flex';
+      this.controls.gesturePopup.style.opacity = '1';
     }
-    this.progressContainer.classList.remove('active');
-  }
-}
-
-// --- Controls System Optimizations --- //
-class ControlsSystem {
-  constructor(video) {
-    this.video = video;
-    this.ui = new UIManager();
-    // Cache interaction zones
-    this.leftZone = document.querySelector('.zone.left-zone');
-    this.centerZone = document.querySelector('.zone.center-zone');
-    this.rightZone = document.querySelector('.zone.right-zone');
-    this.isDragging = false;
-    this.zoneHandler = new ZoneInteractionHandler(this);
-    this.frameAnalyzer = new FrameAnalyzer();
-    this.initInteractions();
-    this.initZoneInteractions();
-    this.initKeyBindings();
-    this.lastHueUpdate = 0;
-    this.HUE_UPDATE_INTERVAL = 500; // Update hue every 500ms
-    this.multiTapState = {};
-    this.arrowTimeout = null;
-    this.initActivityMonitoring();
-  }
-  
-  initInteractions() {
-    this.ui.progressContainer.addEventListener('pointerenter', (e) => {
-      this.ui.updateTimestampPopupPreview(this.video, e.clientX);
-    });
-    
-    const throttledPointerMove = throttle((e) => {
-      this.ui.updateTimestampPopupPreview(this.video, e.clientX);
-      if (this.isDragging) {
-        this.seek(e.clientX);
-      }
-    }, 100);
-
-    // Unified pointer event handling for all devices
-    this.ui.progressContainer.addEventListener('pointermove', throttledPointerMove);
-    
-    const pointerDownHandler = (e) => {
-      e.preventDefault();
-      this.isDragging = true;
-      this.ui.showControls();
-      this.ui.progressContainer.setPointerCapture(e.pointerId);
-      this.seek(e.clientX);
-      this.ui.timestampPopup.style.display = 'block';
-    };
-
-    const pointerUpHandler = (e) => {
-      if (this.isDragging) {
-        this.seek(e.clientX);
-        this.isDragging = false;
-        this.ui.progressContainer.classList.remove("active");
-        this.ui.progressContainer.releasePointerCapture(e.pointerId);
-        this.ui.hideTimestampPopup();
-      }
-    };
-
-    // Use same handlers for all pointer types
-    this.ui.progressContainer.addEventListener('pointerdown', pointerDownHandler);
-    this.ui.progressContainer.addEventListener('pointerup', pointerUpHandler);
-    this.ui.progressContainer.addEventListener('pointercancel', pointerUpHandler);
-    this.ui.progressContainer.addEventListener('pointerleave', (e) => {
-      this.ui.hideTimestampPopup();
-    });
-  }
-  
-  initZoneInteractions() {
-    this.zoneHandler.initialize();
-  }
-  
-  // Helper: Adjust playback position by seconds.
-  secsSeek(seconds) {
-    this.video.currentTime = Math.max(0, this.video.currentTime + seconds);
-  }
-  
-  // Helper: Toggle play/pause of the video.
-  togglePlayPause(clickPos) {
+    if (this.timestampPopup) {
+      this.timestampPopup.style.display = 'block';
+    }
+    this.state.controlsVisible = true;
     this.resetControlsTimeout();
-    if (!clickPos) {
-      clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    }
-    if (this.video.paused) {
-      this.video.play().then(() => {
-        this.ui.showGesturePopup("Play", clickPos);
-      }).catch(err => {
-        console.error("Error playing video:", err);
-        this.ui.showGesturePopup("Play", clickPos);
-      });
-    } else {
-      this.video.pause();
-      this.ui.showGesturePopup("Pause", clickPos);
-    }
   }
-  
-  updateAll() {
-    this.ui.updateBufferBar(this.video);
-    this.ui.updatePlaybackProgress(this.video);
-    const now = Date.now();
-    if (now - this.lastHueUpdate >= this.HUE_UPDATE_INTERVAL) {
-      if (!this.video.paused && this.video.readyState >= 2) {
-        const hue = this.frameAnalyzer.getDominantHue(this.video);
-        this.ui.updateProgressBarColor(hue);
+
+  hideControls() {
+    if (this.state.controlsVisible && !this.video.paused && !this.state.isDragging) {
+      const controlsEl = document.getElementById('controls');
+      if (controlsEl) {
+        controlsEl.style.opacity = '0';
+        controlsEl.style.pointerEvents = 'none';
       }
-      this.lastHueUpdate = now;
+      if (this.controls.gesturePopup) {
+        this.controls.gesturePopup.style.opacity = '0';
+        this.controls.gesturePopup.style.display = 'none';
+      }
+      if (this.timestampPopup) {
+        this.timestampPopup.style.display = 'none';
+      }
+      this.state.controlsVisible = false;
     }
   }
 
-  // --- New: Keypress Gestures ---
   initKeyBindings() {
     document.addEventListener('keydown', this.handleKeyPress.bind(this));
   }
@@ -651,35 +582,35 @@ class ControlsSystem {
     };
 
     // Clear any existing timeout for this direction
-    if (this.arrowTimeout) {
-      clearTimeout(this.arrowTimeout);
-      this.arrowTimeout = null;
+    if (this.state.arrowTimeout) {
+      clearTimeout(this.state.arrowTimeout);
+      this.state.arrowTimeout = null;
     }
 
     // Increment tap count
-    const tapCount = (this.multiTapState?.[direction] || 0) + 1;
-    this.multiTapState = { ...this.multiTapState, [direction]: tapCount };
+    const tapCount = (this.state.multiTapState?.[direction] || 0) + 1;
+    this.state.multiTapState = { ...this.state.multiTapState, [direction]: tapCount };
 
     if (tapCount === 2) {
       // Handle double tap
       if (direction === 'right') {
         loadNextVideo();
-        this.ui.showGesturePopup("Next Video", positions.right);
+        this.showGesturePopup("Next Video", positions.right);
       } else {
         loadPreviousVideo();
-        this.ui.showGesturePopup("Previous Video", positions.left);
+        this.showGesturePopup("Previous Video", positions.left);
       }
-      this.multiTapState[direction] = 0;
+      this.state.multiTapState[direction] = 0;
     } else {
       // Set timeout for single tap action
-      this.arrowTimeout = setTimeout(() => {
+      this.state.arrowTimeout = setTimeout(() => {
         const seconds = direction === 'right' ? 15 : -15;
         this.secsSeek(seconds);
-        this.ui.showGesturePopup(
+        this.showGesturePopup(
           `${direction === 'right' ? 'Forward' : 'Rewind'} 15s`,
           positions[direction]
         );
-        this.multiTapState[direction] = 0;
+        this.state.multiTapState[direction] = 0;
       }, 200);
     }
   }
@@ -689,7 +620,7 @@ class ControlsSystem {
     const position = change > 0 
       ? { x: window.innerWidth / 2, y: 100 }
       : { x: window.innerWidth / 2, y: window.innerHeight - 100 };
-    this.ui.showGesturePopup(
+    this.showGesturePopup(
       this.video.volume === (change > 0 ? 1 : 0) 
         ? `Volume ${change > 0 ? 'Max' : 'Min'}`
         : `Volume ${change > 0 ? '+' : '-'}`,
@@ -697,7 +628,6 @@ class ControlsSystem {
     );
   }
 
-  // Helper: Toggle fullscreen mode.
   toggleFullscreen(clickPos) {
     this.resetControlsTimeout();
     if (!clickPos) {
@@ -708,51 +638,105 @@ class ControlsSystem {
     if (!document.fullscreenElement) {
       if (wrapper) {
         wrapper.requestFullscreen().then(() => {
-          this.ui.showGesturePopup("Fullscreen", clickPos);
+          this.showGesturePopup("Fullscreen", clickPos);
         }).catch(err => {
           console.error(`Error attempting fullscreen: ${err.message}`);
-          this.ui.showGesturePopup("Fullscreen", clickPos);
+          this.showGesturePopup("Fullscreen", clickPos);
         });
       } else {
         console.error("Video wrapper not found.");
       }
     } else {
       document.exitFullscreen().then(() => {
-        this.ui.showGesturePopup("Windowed", clickPos);
+        this.showGesturePopup("Windowed", clickPos);
       }).catch(err => {
         console.error(`Error exiting fullscreen: ${err.message}`);
-        this.ui.showGesturePopup("Windowed", clickPos);
+        this.showGesturePopup("Windowed", clickPos);
       });
     }
   }
 
   seek(clientX) {
     this.resetControlsTimeout();
-    const rect = this.ui.progressContainer.getBoundingClientRect();
+    const rect = this.controls.progressContainer.getBoundingClientRect();
     let offsetX = clientX - rect.left;
     offsetX = Math.max(0, Math.min(offsetX, rect.width));
     const percent = offsetX / rect.width;
     if (this.video.duration) {
       this.video.currentTime = percent * this.video.duration;
     }
-    this.ui.updatePlaybackProgress(this.video);
+    this.updatePlaybackProgress(this.video);
   }
 
   initActivityMonitoring() {
     const activityEvents = ['mousemove', 'click', 'touchstart', 'keydown'];
     activityEvents.forEach(event => {
       document.addEventListener(event, () => {
-        this.ui.showControls();
+        this.showControls();
         this.resetControlsTimeout();
       }, { passive: true });
     });
   }
 
   resetControlsTimeout() {
-    clearTimeout(controlsTimeout);
-    controlsTimeout = setTimeout(() => {
-      this.ui.hideControls();
+    clearTimeout(this.controlsTimeout);
+    this.controlsTimeout = setTimeout(() => {
+      this.hideControls();
     }, CONTROLS_TIMEOUT);
+  }
+
+  handlePointerDown(e) {
+    e.preventDefault();
+    this.state.isDragging = true;
+    this.showControls();
+    this.controls.progressContainer.setPointerCapture(e.pointerId);
+    this.seek(e.clientX);
+    this.timestampPopup.style.display = 'block';
+  }
+
+  handlePointerUp(e) {
+    if (this.state.isDragging) {
+      this.seek(e.clientX);
+      this.state.isDragging = false;
+      this.controls.progressContainer.classList.remove("active");
+      this.controls.progressContainer.releasePointerCapture(e.pointerId);
+      this.hideTimestampPopup();
+    }
+  }
+
+  secsSeek(seconds) {
+    this.video.currentTime = Math.max(0, this.video.currentTime + seconds);
+  }
+
+  togglePlayPause(clickPos) {
+    this.resetControlsTimeout();
+    if (!clickPos) {
+      clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    }
+    if (this.video.paused) {
+      this.video.play().then(() => {
+        this.showGesturePopup("Play", clickPos);
+      }).catch(err => {
+        console.error("Error playing video:", err);
+        this.showGesturePopup("Play", clickPos);
+      });
+    } else {
+      this.video.pause();
+      this.showGesturePopup("Pause", clickPos);
+    }
+  }
+
+  updateAll() {
+    this.updateBufferBar(this.video);
+    this.updatePlaybackProgress(this.video);
+    const now = Date.now();
+    if (now - this.lastHueUpdate >= 500) {
+      if (!this.video.paused && this.video.readyState >= 2) {
+        const hue = this.frameAnalyzer.getDominantHue(this.video);
+        this.updateProgressBarColor(hue);
+      }
+      this.lastHueUpdate = now;
+    }
   }
 }
 
@@ -760,11 +744,10 @@ class ControlsSystem {
 function registerVideoEventListeners() {
   // Buffering and additional video events.
   video.addEventListener("progress", () => {
-    // Buffer bar updates will be handled by the ControlsSystem instance.
-    controlsSystem && controlsSystem.updateAll();
+    controlsSystem && controlsSystem.updateBufferBar(video);
   }, { passive: true });
-  video.addEventListener("loadedmetadata", () => {
-    controlsSystem && controlsSystem.updateAll();
+  video.addEventListener("timeupdate", () => {
+    controlsSystem && controlsSystem.updatePlaybackProgress(video);
   }, { passive: true });
   // Note: timeupdate events will be handled below after instantiating the ControlsSystem.
 }
@@ -773,7 +756,7 @@ function registerVideoEventListeners() {
 async function main() {
   registerVideoEventListeners();
   // Properly uses the globally declared variable
-  controlsSystem = new ControlsSystem(video);
+  controlsSystem = new UIController(video);
 
   // Forward timeupdate events to update the controls system.
   function updateProgress() {
