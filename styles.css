@@ -1,96 +1,104 @@
-html,
+/* Basic resets */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+/* Set body background to navy blue */
 body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  overflow: auto; /* Ensure scrollbars appear when needed */
+    background-color: #001f3f; /* navy blue */
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
 }
 
-body {
-  background: #000;
-  color: white;
-  font-family: Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
+/* Video container responsive design */
 #videoContainer {
-  flex-grow: 1;
-  position: relative;
-  background: black;
-  width: 100%;
-  height: 100%;
-  overflow: auto;
+    width: 90%;
+    max-width: 1000px;
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
 
+/* Video responsive adjustments */
 #videoPlayer {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+    width: 100%;
+    height: 60vh;
+    object-fit: cover;
 }
 
-.controls {
-  position: absolute;
-  bottom: 0;
-  width: 100%;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-  padding: 15px 0;
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  z-index: 2;
-}
-
-.button {
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  padding: 8px;
-  font-size: 20px;
-}
-
+/* Play button styling */
 .big-play-button {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 40px;
-  padding: 20px 40px;
-  background-color: rgba(0, 0, 0, 0.6);
-  border: none;
-  color: white;
-  font-weight: bold;
-  border-radius: 10px;
-  cursor: pointer;
+    padding: 10px 20px;
+    font-size: 1rem;
+    cursor: pointer;
+    margin-top: 10px;
 }
 
+/* Controls styling with frosted glass effect */
+.controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    border-radius: 10px;
+}
+
+/* Progress bar styling */
 .progress {
-  position: relative;
-  height: 8px;
-  background: #555;
-  flex-grow: 1;
-  margin: 0 10px;
-  cursor: pointer;
+    flex: 1;
+    margin: 0 10px;
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    overflow: hidden;
 }
 
 .progress-filled {
-  height: 100%;
-  background: #ff0000;
-  width: 0%;
+    width: 0%;
+    height: 100%;
+    background-color: #FFD700; /* gold color for progress */
+    transition: width 0.1s linear;
 }
 
+/* Volume slider styling */
 .volume-container {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+    display: flex;
+    align-items: center;
 }
 
 .volume-slider {
-  width: 80px;
+    width: 100px;
+}
+
+/* Button styling */
+.button {
+    padding: 5px 10px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+/* Responsive adjustments */
+@media screen and (max-width: 768px) {
+    .controls {
+        flex-direction: column;
+    }
+    .volume-slider {
+        width: 80px;
+    }
+    .big-play-button, .button {
+        font-size: 0.9rem;
+    }
 }
 
 .loading-spinner {

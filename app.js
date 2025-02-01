@@ -41,6 +41,8 @@ const videoSources = shuffleArray([
   const video = document.getElementById("videoPlayer");
   video.preload = "auto"; // Ensure the video buffers progressively.
   const playBtn = document.getElementById("playBtn");
+  const controls = document.getElementById("controls");
+  if (!controls) { console.error('Controls element not found'); }
   let currentVideoIndex = -1;
   let isLoading = false;
   let autoplayAttempted = false;
@@ -172,28 +174,61 @@ const videoSources = shuffleArray([
     video.currentTime = video.duration * clickPercentage;
   });
   
-  // Handle single and double click events on the video for play/pause and fullscreen toggle
-  let clickCount = 0;
-  video.addEventListener("click", () => {
-    clickCount++;
-  
-    if (clickCount === 1) {
-      // Single click: toggle play/pause
-      video.paused ? video.play() : video.pause();
-      playBtn.style.display = video.paused ? "block" : "none";
-    } else if (clickCount === 2) {
+  // Add new controls logic
+  let hideControlsTimeout;
+
+  const showControls = () => {
+    controls.style.display = 'block';
+    clearTimeout(hideControlsTimeout);
+    hideControlsTimeout = setTimeout(() => {
+      hideControls();
+    }, 1000);
+  };
+
+  const hideControls = () => {
+    controls.style.display = 'none';
+  };
+
+  const togglePlayPause = () => {
+    if (video.paused) {
+      video.play();
+      playBtn.style.display = 'none';
+    } else {
+      video.pause();
+      playBtn.style.display = 'block';
+    }
+  };
+
+  // Replace the click event handler with a click-count approach
+  let clickTimeout = null;
+  video.addEventListener('click', (e) => {
+    if (!controls) return;
+    if (clickTimeout) {
+      clearTimeout(clickTimeout);
+      clickTimeout = null;
       // Double click: toggle fullscreen
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen();
       } else {
         document.exitFullscreen();
       }
-      clickCount = 0;
+    } else {
+      clickTimeout = setTimeout(() => {
+        clickTimeout = null;
+        // Single click: if controls are hidden, show them, then toggle play/pause
+        if (controls.style.display === 'none' || controls.style.display === '') {
+          showControls();
+        }
+        togglePlayPause();
+      }, 300);
     }
-  
-    setTimeout(() => {
-      clickCount = 0;
-    }, 300);
+  });
+
+  // Update pointermove event handler to check for controls and simplify behavior
+  video.addEventListener('pointermove', (e) => {
+    if (!controls) return;
+    clearTimeout(hideControlsTimeout);
+    showControls();
   });
   
   // Automatically load the first video if available.
@@ -272,3 +307,13 @@ const videoSources = shuffleArray([
       });
     });
   }
+
+  // Trigger next button when Enter is pressed
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        const nextBtn = document.getElementById('nextBtn');
+        if (nextBtn) {
+            nextBtn.click();
+        }
+    }
+  });
