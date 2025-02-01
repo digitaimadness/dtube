@@ -1,125 +1,261 @@
-/* Basic resets */
-* { margin: 0; padding: 0; box-sizing: border-box; }
+/* Define common colors and variables for reuse */
+:root {
+  --background-color: #000000;
+  --text-color: #f0f0f0;
+  --accent-color: #00bcd4;
+  --control-bg: rgba(0, 0, 0, 0.4);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --progress-track: rgba(50, 50, 50, 0.5);
+  --spinner-border: rgba(255, 255, 255, 0.3);
+}
 
-html, body { height: 100%; }
+/* Reset margins and paddings */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-/* Set body background to navy blue */
+/* Global body */
 body {
-    background-color: #001f3f; /* navy blue */
-    font-family: Arial, sans-serif;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0;
-    padding: 0;
+  background: var(--background-color);
+  font-family: Arial, sans-serif;
+  color: var(--text-color);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: calc(var(--vh, 1vh) * 100);
 }
 
-/* Video container responsive design */
-#videoContainer {
-    width: 90%;
-    max-width: 1000px;
-    margin: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+/* Main container */
+.container {
+  width: 100vw;
+  height: calc(var(--vh, 1vh) * 100);
+  background: var(--background-color);
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
 }
 
-/* Video responsive adjustments */
+/* Video wrapper styling */
+.video-wrapper {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  background: var(--background-color);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+/* Video element styling */
 #videoPlayer {
-    width: 100%;
-    height: 60vh;
-    object-fit: cover;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
 }
 
-/* Play button styling */
-.big-play-button {
-    padding: 10px 20px;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-top: 10px;
-}
-
-/* Controls styling with frosted glass effect */
-.controls {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(10px);
-    border-radius: 10px;
-}
-
-/* Progress bar styling */
-.progress {
-    flex: 1;
-    margin: 0 10px;
-    background-color: rgba(255, 255, 255, 0.3);
-    border-radius: 5px;
-    overflow: hidden;
-}
-
-.progress-filled {
-    width: 0%;
-    height: 100%;
-    background-color: #FFD700; /* gold color for progress */
-    transition: width 0.1s linear;
-}
-
-/* Volume slider styling */
-.volume-container {
-    display: flex;
-    align-items: center;
-}
-
-.volume-slider {
-    width: 100px;
-}
-
-/* Button styling */
-.button {
-    padding: 5px 10px;
-    font-size: 1rem;
-    cursor: pointer;
-}
-
-/* Responsive adjustments */
-@media screen and (max-width: 768px) {
-    .controls {
-        flex-direction: column;
-    }
-    .volume-slider {
-        width: 80px;
-    }
-    .big-play-button, .button {
-        font-size: 0.9rem;
-    }
-}
-
-.loading-spinner {
+/* Spinner styling */
+.spinner {
   display: none;
-  position: fixed;
+  position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
+  width: 50px;
+  height: 50px;
+  margin: -25px 0 0 -25px;
+  border: 4px solid var(--spinner-border);
+  border-top: 4px solid #fff;
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
   animation: spin 1s linear infinite;
 }
 
+/* Spinner animation */
 @keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
+  to {
     transform: rotate(360deg);
   }
+}
+
+/* Controls styling */
+#controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--control-bg);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-color);
+  padding: 8px 15px;
+  display: flex;
+  align-items: center;
+  border-radius: 0 0 10px 10px;
+  z-index: 100;
+}
+
+/* Progress container */
+.progress-container {
+  position: relative;
+  flex: 1;
+  height: 7px;
+  background-color: var(--progress-track);
+  overflow: visible;
+  margin: 0;
+  cursor: pointer;
+  transition: height 0.2s ease;
+}
+
+/* Add zoom effect when interacting */
+.progress-container.active {
+  height: 15px;
+}
+
+/* Buffer bar */
+.buffer-bar {
+  width: 0%;             /* Start with no buffer shown */
+  height: 100%;          /* Always match the progress container's height */
+  background-color: rgba(175, 175, 175, 0.77);  /* Lighter gray with 0.77 transparency */
+  position: absolute;    /* Position it absolutely within its container */
+  top: 0;
+  left: 0;
+  pointer-events: none;  /* Prevent interference with user interactions */
+}
+
+/* Progress bar */
+.progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0%;
+  height: 100%;
+  background-color: #4caf50;
+  z-index: 2;
+  transition: width 0.3s ease;
+  pointer-events: none;
+}
+
+/* Responsive adjustments */
+@media only screen and (max-width: 768px) {
+  #controls {
+    height: 80px;
+  }
+  
+  #controls .progress {
+    height: 10px;
+  }
+}
+
+/* New hover rule */
+.progress-container:hover {
+  height: 15px;
+}
+
+/* Also zoom the progress container when hovering over the underlying controls panel */
+#controls:hover .progress-container {
+  height: 15px;
+}
+
+/* Timestamp popup for progress container */
+.timestamp-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  padding: 4px 8px;
+  font-size: 24px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+  display: none;
+}
+
+/* Optional: show an arrow on the popup */
+.timestamp-popup::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.8) transparent transparent transparent;
+}
+
+/* Interaction zones covering the whole video screen */
+#interactionZones {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  z-index: 10; /* Ensure zones are above the video */
+  pointer-events: none; /* Default: allow clicks to fall through if needed */
+}
+
+.zone {
+  flex: 1;
+  /* Allow zones to capture clicks */
+  pointer-events: auto;
+  background: transparent;
+}
+
+/* Optionally, add hover outlines for debugging -- remove when not needed */
+/*
+.zone:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+*/
+
+/* Add the keyframes for the popup animation */
+@keyframes popupAnimation {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+/* Gesture popup styling */
+.gesture-popup {
+  position: fixed;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  min-width: 150px;
+  min-height: 150px;
+  padding: 20px;
+  font-size: 36px;
+  text-align: center;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+}
+
+.gesture-popup.active {
+  animation: popupAnimation 1.5s forwards;
 }
