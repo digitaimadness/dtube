@@ -121,7 +121,9 @@ async function loadNextVideo() {
       
       // Warm up the buffer
       video.preload = "auto";
+      video.muted = true;
       await video.play();
+      video.muted = false;
       video.pause();
       
       preloadedNextUrl = null;
@@ -142,11 +144,15 @@ async function loadNextVideo() {
 
     // Start playback with better buffering handling
     try {
+      video.muted = true;
       await video.play();
+      video.muted = false;
       // Start preloading next video after successful playback
       preloadNextVideo();
     } catch (error) {
       console.error('Autoplay blocked', error);
+      // Show popup to inform user about muted autoplay
+      controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 });
     }
   } catch (error) {
     console.error('Error loading video:', error);
@@ -354,6 +360,8 @@ class UIController {
     this.frameAnalyzer = new FrameAnalyzer();
     this.zoneHandler = new ZoneInteractionHandler(this);
     this.initializeUI();
+    this.lastHueUpdate = 0;
+    this.fullscreenUIHidden = false;
   }
 
   initializeUI() {
@@ -408,6 +416,19 @@ class UIController {
     this.controls.progressContainer.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
     this.controls.progressContainer.addEventListener('pointerup', (e) => this.handlePointerUp(e));
     this.controls.progressContainer.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
+
+    // Add timestamp popup drag handlers
+    this.timestampPopup.addEventListener('pointerdown', (e) => {
+      this.handlePopupDragStart(e);
+    });
+    
+    document.addEventListener('pointermove', (e) => {
+      this.handlePopupDragMove(e);
+    });
+    
+    document.addEventListener('pointerup', (e) => {
+      this.handlePopupDragEnd(e);
+    });
   }
 
   updateBufferBar(video) {
@@ -440,43 +461,25 @@ class UIController {
   updateProgressBarColor(hue) {
     if (this.controls.progressBar) {
       this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+      // Update timestamp text color to match progress bar
+      this.timestampPopup.style.color = `hsl(${hue}, 70%, 95%)`;
       // Update background with matching hue but lower saturation/lightness
       this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
     }
   }
 
-  updateTimestampPopupPreview(video, clientX) {
-    const rect = this.state.cachedRect || this.controls.progressContainer.getBoundingClientRect();
-    let offsetX = clientX - rect.left;
-    offsetX = Math.max(0, Math.min(offsetX, rect.width));
-    const percent = offsetX / rect.width;
-    // Handle undefined/zero duration case explicitly
-    const popupText = video.duration && video.duration > 0 ? formatTime(percent * video.duration) : "0:00";
-
-    // Only update the popup if the value has changed significantly
-    if (this.state.lastPopupOffsetX !== null && Math.abs(offsetX - this.state.lastPopupOffsetX) < 1 && this.state.lastPopupText === popupText) {
-      return;
-    }
-    this.state.lastPopupOffsetX = offsetX;
-    this.state.lastPopupText = popupText;
-
+  updateTimestampPopupPreview(offsetX) {
+    const rect = this.controls.progressContainer.getBoundingClientRect();
+    const popupText = formatTime(this.video.currentTime);
+    
     // Calculate popup boundaries
     const popupWidth = this.timestampPopup.offsetWidth;
     const containerWidth = rect.width;
+    const adjustedX = Math.max(popupWidth/2, Math.min(offsetX, containerWidth - popupWidth/2));
     
-    // Ensure popup stays within container bounds
-    const minX = popupWidth / 2;
-    const maxX = containerWidth - popupWidth / 2;
-    offsetX = Math.max(minX, Math.min(offsetX, maxX));
-
     this.timestampPopup.textContent = popupText;
-    this.timestampPopup.style.left = `${offsetX}px`;
-    this.timestampPopup.style.transform = 'translateX(-50%)';
-    this.timestampPopup.style.display = 'block';
-  }
-
-  hideTimestampPopup() {
-    this.timestampPopup.style.display = 'none';
+    this.timestampPopup.style.left = `${adjustedX}px`;
+    this.timestampPopup.style.opacity = '1'; // Force opacity to 1
   }
 
   showGesturePopup(message, clickPos) {
@@ -486,10 +489,30 @@ class UIController {
       clearTimeout(this.hideTimeout);
       this.hideTimeout = null;
     }
-    gp.style.display = 'flex';
-    gp.style.opacity = '0';
-    gp.style.transform = 'translate(-50%, -50%) scale(0)';
-    gp.style.transition = 'opacity 300ms ease, transform 300ms ease';
+    
+    // Get current progress bar color for consistency
+    const currentHue = this.frameAnalyzer.getDominantHue(this.video);
+    
+    // Apply matching styles with progress bar (updated opacity)
+    gp.style.cssText = `
+      display: flex;
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0);
+      transition: opacity 300ms ease, transform 300ms ease;
+      background: hsla(${currentHue}, 70%, 50%, 0.2);
+      color: hsla(${currentHue}, 70%, 95%, 0.9);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 1.6em;
+      font-weight: bold;
+      text-shadow: 0 1px 3px hsla(${currentHue}, 70%, 20%, 0.4);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      border: 2px solid hsla(${currentHue}, 70%, 35%, 0.8);
+      backdrop-filter: blur(4px);
+      min-width: auto;
+      white-space: nowrap;
+    `;
+
     gp.offsetHeight; // trigger reflow
     gp.textContent = message;
     const posX = clickPos?.x ?? window.innerWidth/2;
@@ -511,38 +534,18 @@ class UIController {
   }
 
   showControls() {
-    const controlsEl = document.getElementById('controls');
-    if (controlsEl) {
-      controlsEl.style.opacity = '1';
-      controlsEl.style.pointerEvents = 'auto';
-    }
-    if (this.controls.gesturePopup) {
-      this.controls.gesturePopup.style.display = 'flex';
-      this.controls.gesturePopup.style.opacity = '1';
-    }
-    if (this.timestampPopup) {
-      this.timestampPopup.style.display = 'block';
-    }
-    this.state.controlsVisible = true;
-    this.resetControlsTimeout();
+    if (this.controlsVisible && !this.fullscreenUIHidden) return;
+    this.controlsVisible = true;
+    this.controls.progressContainer.style.opacity = '1';
+    this.timestampPopup.style.opacity = '1';
   }
 
   hideControls() {
-    if (this.state.controlsVisible && !this.video.paused && !this.state.isDragging) {
-      const controlsEl = document.getElementById('controls');
-      if (controlsEl) {
-        controlsEl.style.opacity = '0';
-        controlsEl.style.pointerEvents = 'none';
-      }
-      if (this.controls.gesturePopup) {
-        this.controls.gesturePopup.style.opacity = '0';
-        this.controls.gesturePopup.style.display = 'none';
-      }
-      if (this.timestampPopup) {
-        this.timestampPopup.style.display = 'none';
-      }
-      this.state.controlsVisible = false;
-    }
+    if (!this.controlsVisible || !document.fullscreenElement) return;
+    this.controlsVisible = false;
+    this.fullscreenUIHidden = true;
+    this.controls.progressContainer.style.opacity = '0';
+    this.timestampPopup.style.opacity = '0';
   }
 
   initKeyBindings() {
@@ -632,16 +635,18 @@ class UIController {
       if (wrapper) {
         wrapper.requestFullscreen().then(() => {
           this.showGesturePopup("Fullscreen", clickPos);
+          this.fullscreenUIHidden = false;
+          this.showControls(); // Show controls immediately when entering fullscreen
         }).catch(err => {
           console.error(`Error attempting fullscreen: ${err.message}`);
           this.showGesturePopup("Fullscreen", clickPos);
         });
-      } else {
-        console.error("Video wrapper not found.");
       }
     } else {
       document.exitFullscreen().then(() => {
         this.showGesturePopup("Windowed", clickPos);
+        this.fullscreenUIHidden = false;
+        this.showControls(); // Ensure controls are visible when exiting
       }).catch(err => {
         console.error(`Error exiting fullscreen: ${err.message}`);
         this.showGesturePopup("Windowed", clickPos);
@@ -707,6 +712,8 @@ class UIController {
       clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     }
     if (this.video.paused) {
+      // Unmute on first user interaction
+      this.video.muted = false;
       this.video.play().then(() => {
         this.showGesturePopup("Play", clickPos);
       }).catch(err => {
@@ -721,15 +728,45 @@ class UIController {
 
   updateAll() {
     this.updateBufferBar(this.video);
+    
+    // Always update playback progress regardless of controls visibility
     this.updatePlaybackProgress(this.video);
-    const now = Date.now();
-    if (now - this.lastHueUpdate >= 500) {
+    
+    if (this.video.duration > 0) {
+      const rect = this.controls.progressContainer.getBoundingClientRect();
+      const percent = this.video.currentTime / this.video.duration;
+      const offsetX = percent * rect.width;
+      this.updateTimestampPopupPreview(offsetX);
+    }
+
+    if (Date.now() - this.lastHueUpdate >= 500) {
       if (!this.video.paused && this.video.readyState >= 2) {
         const hue = this.frameAnalyzer.getDominantHue(this.video);
         this.updateProgressBarColor(hue);
       }
-      this.lastHueUpdate = now;
+      this.lastHueUpdate = Date.now();
     }
+  }
+
+  handlePopupDragStart(e) {
+    this.state.isDraggingPopup = true;
+    this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
+    this.seek(e.clientX);
+  }
+
+  handlePopupDragMove(e) {
+    if (this.state.isDraggingPopup) {
+      this.seek(e.clientX);
+      // Manually update popup position during drag
+      const rect = this.state.cachedRect;
+      const offsetX = e.clientX - rect.left;
+      this.updateTimestampPopupPreview(offsetX);
+    }
+  }
+
+  handlePopupDragEnd(e) {
+    this.state.isDraggingPopup = false;
+    this.state.cachedRect = null;
   }
 }
 

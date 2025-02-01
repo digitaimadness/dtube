@@ -94,33 +94,36 @@ body {
   align-items: center;
   border-radius: 0 0 10px 10px;
   z-index: 100;
+  transition: all 0.3s ease;
+  height: 20px !important;
+  opacity: 0.6 !important;
+  padding: 4px 8px !important;
 }
 
-/* Progress container */
-.progress-container {
-  touch-action: none;
-  position: relative;
-  flex: 1;
-  height: 7px;
-  background-color: var(--progress-track);
-  overflow: visible;
-  margin: 0;
-  cursor: pointer;
-  transition: opacity 0.3s ease, height 0.2s ease;
+/* Minimized controls state */
+#controls.minimized {
+  height: 20px;
+  opacity: 0.6;
+  padding: 4px 8px;
+}
+
+/* Progress container in minimized state */
+#controls.minimized .progress-container {
+  height: 3px !important;
 }
 
 /* Grouped hover/active rules for progress-container */
 .progress-container.active,
 .progress-container:hover,
 #controls:hover .progress-container {
-  height: 15px;
+  height: 8px;
 }
 
 /* Buffer bar */
 .buffer-bar {
   width: 0%;             /* Start with no buffer shown */
   height: 100%;          /* Always match the progress container's height */
-  background-color: rgba(175, 175, 175, 0.77);
+  background-color: rgba(175, 175, 175, 0.3);
   position: absolute;
   top: 0;
   left: 0;
@@ -157,28 +160,43 @@ body {
 /* Timestamp popup for progress container */
 .timestamp-popup {
   position: absolute;
-  bottom: 30px;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 0.9em;
-  pointer-events: none;
+  bottom: 20px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.95em;
+  font-weight: 500;
   transform: translateX(-50%);
-  display: none;
-  white-space: nowrap;
+  opacity: 0;
+  display: block;
+  cursor: grab;
+  pointer-events: auto;
+  transition: opacity 0.2s ease;
+  backdrop-filter: blur(2px);
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
-/* Arrow for timestamp popup */
+/* Remove the arrow from timestamp popup */
 .timestamp-popup::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 5px;
-  border-style: solid;
-  border-color: rgba(0, 0, 0, 0.8) transparent transparent transparent;
+  content: none;
+}
+
+/* Hover state for timestamp */
+.progress-container:hover .timestamp-popup {
+  transform: translateX(-50%) scale(0.9);
+  opacity: 0.8;
+}
+
+/* Update progress container transitions */
+.progress-container {
+  touch-action: none;
+  position: relative;
+  flex: 1;
+  height: 4px;
+  background-color: transparent;
+  overflow: visible;
+  margin: 0;
+  cursor: pointer;
+  transition: opacity 0.3s ease;
 }
 
 /* Interaction zones covering the whole video screen */
@@ -201,25 +219,7 @@ body {
 
 /* Updated Popup Styling */
 .popup {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  padding: 20px;
-  background-color: #fff;
-  color: #000 !important;  /* Force text color to stay black */
-  font-size: 1rem;
-  text-align: center;
-  border-radius: 8px;
-  z-index: 1000;
-  display: none;
-  box-sizing: border-box;
-  word-wrap: break-word;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  max-width: 80%;
-}
-.popup.active {
-  display: inline-block;
+  display: none !important;
 }
 
 /* Optionally, modify the gesture popup if needed */
@@ -228,13 +228,10 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  width: 150px;
-  height: 150px;
-  font-size: 36px;
-  text-align: center;
-  border-radius: 50%;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 1.6em;
+  font-weight: bold;
   pointer-events: none;
   z-index: 20;
   display: flex;
@@ -242,6 +239,9 @@ body {
   justify-content: center;
   box-sizing: border-box;
   opacity: 0;
+  min-width: auto;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
 }
 .gesture-popup.active {
   animation: popupAnimation 1.5s forwards;
