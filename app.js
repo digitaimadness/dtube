@@ -196,32 +196,6 @@ async function loadPreviousVideo() {
 }
 
 /**
- * Updates the video buffering indicator.
- */
-function updateVideoBufferingImpl() {
-  const bufferBar = document.querySelector('.buffer-bar');
-  // If video duration isn't available, show an empty buffer bar.
-  if (!video.duration) {
-    if (bufferBar) {
-      bufferBar.style.width = "0%";
-      // Set darker background color with 50% transparency
-      bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-    }
-    return;
-  }
-  let bufferedPercentage = 0;
-  if (video.buffered.length > 0) {
-    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-    bufferedPercentage = (bufferedEnd / video.duration) * 100;
-  }
-  if (bufferBar) {
-    bufferBar.style.width = bufferedPercentage + '%';
-    // Set darker background color with 50% transparency
-    bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
-  }
-}
-
-/**
  * Converts an RGB color to its corresponding hue (in degrees).
  */
 function rgbToHue(r, g, b) {
@@ -243,175 +217,466 @@ function rgbToHue(r, g, b) {
   return hue;
 }
 
-/**
- * Updates the progress bar color based on the overall hue of the video.
- */
-function updateProgressBarColor() {
-  if (video.paused || video.readyState < 2) return;
-  try {
-    offscreenCtx.drawImage(video, 0, 0, samplingWidth, samplingHeight);
-    const imageData = offscreenCtx.getImageData(0, 0, samplingWidth, samplingHeight);
-    const data = imageData.data;
+// --- New Controls and Progress Bar System ---
+class ZoneInteractionHandler {
+  constructor(controlsSystem) {
+    this.controls = controlsSystem;
+    this.MULTI_TAP_DELAY = 200;
+  }
+
+  initialize() {
+    this.setupZone(this.controls.leftZone, this.handleLeftZoneClick.bind(this));
+    this.setupZone(this.controls.rightZone, this.handleRightZoneClick.bind(this));
+    this.setupZone(this.controls.centerZone, this.handleCenterZoneClick.bind(this));
+  }
+
+  setupZone(zone, handler) {
+    let clickCount = 0;
+    let timeout;
+
+    zone.addEventListener('click', (e) => {
+      const clickPos = { x: e.clientX, y: e.clientY };
+      clickCount++;
+      clearTimeout(timeout);
+
+      if (clickCount === 3) {
+        handler(clickPos, 3);
+        clickCount = 0;
+        return;
+      }
+
+      timeout = setTimeout(() => {
+        handler(clickPos, clickCount);
+        clickCount = 0;
+      }, this.MULTI_TAP_DELAY);
+    });
+  }
+
+  handleLeftZoneClick(clickPos, count) {
+    switch(count) {
+      case 1: 
+        this.controls.togglePlayPause(clickPos); 
+        break;
+      case 2: 
+        this.controls.secsSeek(-15, clickPos);
+        this.controls.showGesturePopup("Rewind 15s", clickPos);
+        break;
+      case 3: 
+        loadPreviousVideo();
+        this.controls.showGesturePopup("Previous Video", clickPos);
+        break;
+    }
+  }
+
+  handleRightZoneClick(clickPos, count) {
+    switch(count) {
+      case 1: 
+        this.controls.togglePlayPause(clickPos); 
+        break;
+      case 2: 
+        this.controls.secsSeek(15, clickPos);
+        this.controls.showGesturePopup("Forward 15s", clickPos);
+        break;
+      case 3:
+        loadNextVideo();
+        this.controls.showGesturePopup("Next Video", clickPos);
+        break;
+    }
+  }
+
+  handleCenterZoneClick(clickPos, count) {
+    switch(count) {
+      case 1: this.controls.togglePlayPause(clickPos); break;
+      case 2: this.controls.toggleFullscreen(clickPos); break;
+    }
+  }
+}
+
+// --- Frame Analysis Optimizations --- //
+class FrameAnalyzer {
+  static samplingWidth = 32;
+  static samplingHeight = 32;
+  static PIXEL_STEP = 8; // Sample every other pixel
+
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.canvas.width = FrameAnalyzer.samplingWidth;
+    this.canvas.height = FrameAnalyzer.samplingHeight;
+  }
+
+  getDominantHue(video) {
+    try {
+      this.ctx.drawImage(video, 0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
+      const imageData = this.ctx.getImageData(0, 0, 
+        FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
+      return this.calculateAverageHue(imageData.data);
+    } catch (error) {
+      console.warn("Frame analysis error:", error);
+      return 0;
+    }
+  }
+
+  calculateAverageHue(data) {
     let r = 0, g = 0, b = 0;
-    const count = samplingWidth * samplingHeight;
-    for (let i = 0; i < data.length; i += 4) {
+    // Process every other pixel using step size
+    for (let i = 0; i < data.length; i += FrameAnalyzer.PIXEL_STEP) {
       r += data[i];
       g += data[i + 1];
       b += data[i + 2];
     }
-    r /= count;
-    g /= count;
-    b /= count;
-    const hue = rgbToHue(r, g, b);
-    if (progressFilledElem) {
-      // Adjust saturation/lightness as needed; here we use 70% saturation and 50% lightness.
-      progressFilledElem.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
-    }
-  } catch (error) {
-    console.warn("Error updating progress bar color:", error);
+    const totalPixels = (data.length / 4) * (4 / FrameAnalyzer.PIXEL_STEP);
+    return rgbToHue(r/totalPixels, g/totalPixels, b/totalPixels);
   }
 }
 
-/**
- * Throttles video buffering updates to limit DOM redraws.
- */
-function updateVideoBuffering() {
-  if (!bufferingUpdateScheduled) {
-    bufferingUpdateScheduled = true;
-    requestAnimationFrame(() => {
-      updateVideoBufferingImpl();
-      bufferingUpdateScheduled = false;
+// --- Controls System Optimizations --- //
+class ControlsSystem {
+  constructor(video) {
+    this.video = video;
+    this.progressContainer = document.querySelector('.progress-container');
+    this.progressBar = document.querySelector('.progress-bar');
+    this.bufferBar = document.querySelector('.buffer-bar');
+    // Create a timestamp popup element and add it to the progress container
+    this.timestampPopup = document.createElement('div');
+    this.timestampPopup.className = 'timestamp-popup';
+    this.progressContainer.appendChild(this.timestampPopup);
+    // Cache the gesture popup element (defined in index.html)
+    this.gesturePopup = document.getElementById('gesturePopup');
+    // Cache the interaction zones
+    this.leftZone = document.querySelector('.zone.left-zone');
+    this.centerZone = document.querySelector('.zone.center-zone');
+    this.rightZone = document.querySelector('.zone.right-zone');
+    this.isDragging = false;
+    this.zoneHandler = new ZoneInteractionHandler(this);
+    this.frameAnalyzer = new FrameAnalyzer();
+    this.initInteractions();
+    this.initZoneInteractions();
+    this.initKeyBindings();
+    this.lastHueUpdate = 0;
+    this.HUE_UPDATE_INTERVAL = 500; // Update hue every 500ms
+    this.multiTapState = {};
+    this.arrowTimeout = null;
+  }
+  
+  initInteractions() {
+    this.progressContainer.addEventListener('pointerenter', (e) => {
+      this.updateTimestampPopupPreview(e.clientX);
+      this.timestampPopup.style.display = 'block';
+    });
+    this.progressContainer.addEventListener('pointermove', (e) => {
+      this.updateTimestampPopupPreview(e.clientX);
+      if (this.isDragging) {
+        this.seek(e.clientX);
+      }
+    });
+    this.progressContainer.addEventListener('pointerdown', (e) => {
+      this.isDragging = true;
+      this.progressContainer.classList.add("active");
+      this.progressContainer.setPointerCapture(e.pointerId);
+      this.seek(e.clientX);
+      this.timestampPopup.style.display = 'block';
+    });
+    const pointerUpCancel = (e) => {
+      if (this.isDragging) {
+        this.seek(e.clientX);
+        this.isDragging = false;
+        this.progressContainer.classList.remove("active");
+        this.progressContainer.releasePointerCapture(e.pointerId);
+        this.timestampPopup.style.display = 'none';
+      }
+    };
+    this.progressContainer.addEventListener('pointerup', pointerUpCancel);
+    this.progressContainer.addEventListener('pointercancel', pointerUpCancel);
+    this.progressContainer.addEventListener('pointerleave', (e) => {
+      this.timestampPopup.style.display = 'none';
     });
   }
-}
-
-/**
- * Registers video-specific event listeners.
- */
-function registerVideoEventListeners() {
-  // Buffering and progress updates.
-  video.addEventListener("progress", updateVideoBuffering, { passive: true });
-  video.addEventListener("loadedmetadata", updateVideoBuffering, { passive: true });
-  video.addEventListener("timeupdate", () => {
-    updateVideoBuffering();
-    updateProgressBarColor(); // update progress bar color based on current frame
-    updatePlaybackProgress();
-  }, { passive: true });
-
-  // Video error handling.
-  video.addEventListener("error", e => {
-    console.error("Video encountered an error:", e);
-  });
-
-  // Load the next video when the current one ends.
-  video.addEventListener("ended", () => {
-    console.log("Video ended; loading next video.");
-    loadNextVideo();
-  });
-}
-
-/**
- * Registers progress bar interactions for clickable and draggable seek functionality.
- */
-function registerProgressBarInteractions() {
-  const progressContainer = document.querySelector('.progress-container');
-  if (!progressContainer) return;
   
-  // Create tooltip for timestamp display
-  let timestampPopup = document.createElement('div');
-  timestampPopup.className = 'timestamp-popup';
-  progressContainer.appendChild(timestampPopup);
-  
-  let isDragging = false;
-  
-  // Helper function: update popup preview (does not change video.currentTime)
-  function updateTimestampPopupPreview(clientX) {
-    const rect = progressContainer.getBoundingClientRect();
-    let offsetX = clientX - rect.left;
-    offsetX = Math.max(0, Math.min(offsetX, rect.width));
-    const percent = offsetX / rect.width;
-    if (video.duration) {
-      timestampPopup.textContent = formatTime(percent * video.duration);
-    } else {
-      timestampPopup.textContent = "0:00";
-    }
-    timestampPopup.style.left = offsetX + 'px';
-    // For debugging, force it visible (later you can comment this out)
-    timestampPopup.style.display = 'block';
+  initZoneInteractions() {
+    this.zoneHandler.initialize();
   }
   
-  // When dragging, update video time and popup
-  const seek = (clientX) => {
-    const rect = progressContainer.getBoundingClientRect();
+  // Helper: Adjust playback position by seconds.
+  secsSeek(seconds) {
+    this.video.currentTime = Math.max(0, this.video.currentTime + seconds);
+  }
+  
+  // Helper: Toggle play/pause of the video.
+  togglePlayPause(clickPos) {
+    // If no click position is provided (e.g. from keypress), default to the viewport center.
+    if (!clickPos) {
+      clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    }
+
+    if (this.video.paused) {
+      this.video.play().then(() => {
+        this.showGesturePopup("Play", clickPos);
+      }).catch(err => {
+        console.error("Error playing video:", err);
+        // In case of an error, still display the popup.
+        this.showGesturePopup("Play", clickPos);
+      });
+    } else {
+      this.video.pause();
+      this.showGesturePopup("Pause", clickPos);
+    }
+  }
+  
+  // Helper: Show a gesture popup with a message.
+  // This method applies the same out-of-bound handling for popups whether the gesture originates
+  // from a tap or a keyboard event. If the desired position would place the popup outside the viewport,
+  // the position is averaged with the viewport center.
+  showGesturePopup(message, clickPos) {
+    const gp = this.gesturePopup;
+    if (!gp) return;
+
+    if (this.hideTimeout) {
+        clearTimeout(this.hideTimeout);
+        this.hideTimeout = null;
+    }
+
+    // Reset to initial state with scale 0
+    gp.style.display = 'flex';
+    gp.style.opacity = '0';
+    gp.style.transform = 'translate(-50%, -50%) scale(0)';
+    
+    gp.offsetHeight; // Trigger reflow
+
+    gp.textContent = message;
+
+    const posX = clickPos?.x ?? window.innerWidth/2;
+    const posY = clickPos?.y ?? window.innerHeight/2;
+
+    gp.style.left = `${posX}px`;
+    gp.style.top = `${posY}px`;
+
+    requestAnimationFrame(() => {
+        // Animate in with scale up
+        gp.style.opacity = '1';
+        gp.style.transform = 'translate(-50%, -50%) scale(1)';
+    });
+
+    this.hideTimeout = setTimeout(() => {
+        // Animate out with scale down
+        gp.style.opacity = '0';
+        gp.style.transform = 'translate(-50%, -50%) scale(0)';
+        this.hideTimeout = setTimeout(() => {
+            gp.style.display = 'none';
+            this.hideTimeout = null;
+        }, 300); // Match transition duration
+    }, 1000);
+  }
+  
+  updateBufferBar() {
+    if (!this.video.duration) {
+      if (this.bufferBar) {
+        this.bufferBar.style.width = "0%";
+        this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+      }
+      return;
+    }
+    let bufferedPercentage = 0;
+    if (this.video.buffered.length > 0) {
+      const bufferedEnd = this.video.buffered.end(this.video.buffered.length - 1);
+      bufferedPercentage = (bufferedEnd / this.video.duration) * 100;
+    }
+    if (this.bufferBar) {
+      this.bufferBar.style.width = bufferedPercentage + '%';
+      this.bufferBar.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
+    }
+  }
+  
+  updatePlaybackProgress() {
+    if (!this.video.duration) return;
+    const percent = (this.video.currentTime / this.video.duration) * 100;
+    if (this.progressBar) {
+      this.progressBar.style.width = percent + '%';
+    }
+  }
+  
+  updateProgressBarColor() {
+    if (this.video.paused || this.video.readyState < 2) return;
+    const hue = this.frameAnalyzer.getDominantHue(this.video);
+    this.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+  }
+  
+  updateTimestampPopupPreview(clientX) {
+    const rect = this.progressContainer.getBoundingClientRect();
     let offsetX = clientX - rect.left;
     offsetX = Math.max(0, Math.min(offsetX, rect.width));
     const percent = offsetX / rect.width;
-    if (video.duration) {
-      video.currentTime = percent * video.duration;
-      updatePlaybackProgress();
+    
+    if (this.video.duration) {
+      this.timestampPopup.textContent = formatTime(percent * this.video.duration);
+    } else {
+      this.timestampPopup.textContent = "0:00";
     }
-    // Also update the popup (for dragging)
-    updateTimestampPopupPreview(clientX);
-  };
+    
+    // Apply boundary constraints
+    const popupWidth = this.timestampPopup.offsetWidth;
+    const maxLeft = rect.width - popupWidth;
+    offsetX = Math.max(0, Math.min(offsetX - popupWidth/2, maxLeft));
+    
+    this.timestampPopup.style.left = `${offsetX}px`;
+    this.timestampPopup.style.display = 'block';
+  }
   
-  // When pointer enters, update popup preview and display it
-  progressContainer.addEventListener('pointerenter', (e) => {
-    console.log("pointerenter", e);
-    updateTimestampPopupPreview(e.clientX);
-    timestampPopup.style.display = 'block';
-  });
-  
-  // Pointer move: always update the preview; if dragging, update playback as well
-  progressContainer.addEventListener('pointermove', (e) => {
-    console.log("pointermove", e);
-    updateTimestampPopupPreview(e.clientX);
-    if (isDragging) {
-      seek(e.clientX);
+  seek(clientX) {
+    const rect = this.progressContainer.getBoundingClientRect();
+    let offsetX = clientX - rect.left;
+    offsetX = Math.max(0, Math.min(offsetX, rect.width));
+    const percent = offsetX / rect.width;
+    if (this.video.duration) {
+      this.video.currentTime = percent * this.video.duration;
     }
-  });
+    this.updatePlaybackProgress();
+  }
   
-  // On pointer down, begin dragging: update playback and show popup
-  progressContainer.addEventListener('pointerdown', (e) => {
-    console.log("pointerdown", e);
-    isDragging = true;
-    progressContainer.classList.add("active");
-    progressContainer.setPointerCapture(e.pointerId);
-    seek(e.clientX);
-    timestampPopup.style.display = 'block';
-  });
-  
-  // When pointer leaves or pointer is up/canceled, hide the popup and stop dragging
-  progressContainer.addEventListener('pointerup', (e) => {
-    console.log("pointerup", e);
-    if (isDragging) {
-      seek(e.clientX);
-      isDragging = false;
-      progressContainer.classList.remove("active");
-      progressContainer.releasePointerCapture(e.pointerId);
-      timestampPopup.style.display = 'none';
+  updateAll() {
+    this.updateBufferBar();
+    this.updatePlaybackProgress();
+    
+    // Throttle hue updates
+    const now = Date.now();
+    if (now - this.lastHueUpdate >= this.HUE_UPDATE_INTERVAL) {
+      this.updateProgressBarColor();
+      this.lastHueUpdate = now;
     }
-  });
-  
-  progressContainer.addEventListener('pointercancel', (e) => {
-    console.log("pointercancel", e);
-    isDragging = false;
-    progressContainer.classList.remove("active");
-    progressContainer.releasePointerCapture(e.pointerId);
-    timestampPopup.style.display = 'none';
-  });
-  
-  progressContainer.addEventListener('pointerleave', (e) => {
-    console.log("pointerleave", e);
-    timestampPopup.style.display = 'none';
-  });
+  }
+
+  // --- New: Keypress Gestures ---
+  initKeyBindings() {
+    document.addEventListener('keydown', this.handleKeyPress.bind(this));
+  }
+
+  handleKeyPress(e) {
+    if (e.repeat) return;
+    
+    const keyActions = {
+      'Space': () => this.togglePlayPause(null),
+      'KeyF': () => this.toggleFullscreen(null),
+      'ArrowRight': () => this.handleArrowKey('right', e),
+      'ArrowLeft': () => this.handleArrowKey('left', e),
+      'ArrowUp': () => this.adjustVolume(0.1),
+      'ArrowDown': () => this.adjustVolume(-0.1)
+    };
+
+    if (keyActions[e.code]) {
+      e.preventDefault();
+      keyActions[e.code]();
+    }
+  }
+
+  handleArrowKey(direction, e) {
+    const positions = {
+      right: { x: window.innerWidth - 100, y: window.innerHeight / 2 },
+      left: { x: 100, y: window.innerHeight / 2 }
+    };
+
+    // Clear any existing timeout for this direction
+    if (this.arrowTimeout) {
+      clearTimeout(this.arrowTimeout);
+      this.arrowTimeout = null;
+    }
+
+    // Increment tap count
+    const tapCount = (this.multiTapState?.[direction] || 0) + 1;
+    this.multiTapState = { ...this.multiTapState, [direction]: tapCount };
+
+    if (tapCount === 2) {
+      // Handle double tap
+      if (direction === 'right') {
+        loadNextVideo();
+        this.showGesturePopup("Next Video", positions.right);
+      } else {
+        loadPreviousVideo();
+        this.showGesturePopup("Previous Video", positions.left);
+      }
+      this.multiTapState[direction] = 0;
+    } else {
+      // Set timeout for single tap action
+      this.arrowTimeout = setTimeout(() => {
+        const seconds = direction === 'right' ? 15 : -15;
+        this.secsSeek(seconds);
+        this.showGesturePopup(
+          `${direction === 'right' ? 'Forward' : 'Rewind'} 15s`,
+          positions[direction]
+        );
+        this.multiTapState[direction] = 0;
+      }, 200);
+    }
+  }
+
+  adjustVolume(change) {
+    this.video.volume = Math.min(Math.max(this.video.volume + change, 0), 1);
+    const position = change > 0 
+      ? { x: window.innerWidth / 2, y: 100 }
+      : { x: window.innerWidth / 2, y: window.innerHeight - 100 };
+    this.showGesturePopup(
+      this.video.volume === (change > 0 ? 1 : 0) 
+        ? `Volume ${change > 0 ? 'Max' : 'Min'}`
+        : `Volume ${change > 0 ? '+' : '-'}`,
+      position
+    );
+  }
+
+  // Helper: Toggle fullscreen mode.
+  toggleFullscreen(clickPos) {
+    // If no click position is provided (e.g. from keypress), default to the viewport center.
+    if (!clickPos) {
+      clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    }
+
+    const wrapper = document.querySelector('.video-wrapper');
+    if (!document.fullscreenElement) {
+      if (wrapper) {
+        wrapper.requestFullscreen().then(() => {
+          this.showGesturePopup("Fullscreen", clickPos);
+        }).catch(err => {
+          console.error(`Error attempting fullscreen: ${err.message}`);
+          this.showGesturePopup("Fullscreen", clickPos);
+        });
+      } else {
+        console.error("Video wrapper not found.");
+      }
+    } else {
+      document.exitFullscreen().then(() => {
+        this.showGesturePopup("Windowed", clickPos);
+      }).catch(err => {
+        console.error(`Error exiting fullscreen: ${err.message}`);
+        this.showGesturePopup("Windowed", clickPos);
+      });
+    }
+  }
 }
 
-/**
- * Main initialization function.
- */
+// --- Update registerVideoEventListeners ---
+function registerVideoEventListeners() {
+  // Buffering and additional video events.
+  video.addEventListener("progress", () => {
+    // Buffer bar updates will be handled by the ControlsSystem instance.
+    controlsSystem && controlsSystem.updateBufferBar();
+  }, { passive: true });
+  video.addEventListener("loadedmetadata", () => {
+    controlsSystem && controlsSystem.updateBufferBar();
+  }, { passive: true });
+  // Note: timeupdate events will be handled below after instantiating the ControlsSystem.
+}
+
+// --- Update main() to instantiate ControlsSystem --- //
 async function main() {
   registerVideoEventListeners();
-  registerProgressBarInteractions();
+  // Instantiate the unified controls system.
+  const controlsSystem = new ControlsSystem(video);
+
+  // Forward timeupdate events to update the controls system.
+  function updateProgress() {
+    controlsSystem.updateAll();
+    requestAnimationFrame(updateProgress);
+  }
+
+  requestAnimationFrame(updateProgress);
 
   if (videoSources.length > 0) {
     await loadNextVideo();
@@ -433,19 +698,6 @@ setViewportHeight();
 window.addEventListener('resize', setViewportHeight);
 window.addEventListener('orientationchange', setViewportHeight);
 
-// Remove simulation code. Instead update playback progress based on actual video data.
-
-/**
- * Updates the playback progress bar based on current time.
- */
-function updatePlaybackProgress() {
-  if (!video.duration) return;
-  const percent = (video.currentTime / video.duration) * 100;
-  if (progressFilledElem) {
-    progressFilledElem.style.width = percent + '%';
-  }
-}
-
 /**
  * Format time (in seconds) to mm:ss format.
  */
@@ -466,201 +718,58 @@ function zoneSeekVideo(seconds) {
   video.currentTime = Math.max(0, video.currentTime + seconds);
 }
 
-// Left zone: single click toggles play/pause, double-click seeks backward, triple-click loads previous video.
-(function() {
-  let clickCount = 0;
-  let clickTimeout;
-  leftZone.addEventListener('click', (e) => {
-    clickCount++;
-    clearTimeout(clickTimeout);
-    clickTimeout = setTimeout(() => {
-      if (clickCount === 1) {
-        console.log("Left zone single-click: Toggle play/pause");
-        togglePlayPause();
-      } else if (clickCount === 2) {
-        console.log("Left zone double-click: Seek video 15s backward");
-        zoneSeekVideo(-15);
-        showGesturePopup("Rewind 15s");
-      } else if (clickCount === 3) {
-        console.log("Left zone triple-click: Load previous video");
-        loadPreviousVideo();
-        showGesturePopup("Previous Video");
-      }
-      clickCount = 0;
-    }, 250);
-  });
-})();
+// --- Rewritten Popup Class Implementation from scratch ---
+class Popup {
+  constructor() {
+    // Create an overlay element with the popup-overlay class
+    this.overlay = document.createElement('div');
+    this.overlay.classList.add('popup-overlay');
 
-// Right zone: single click toggles play/pause, double-click seeks forward, triple-click loads next video.
-(function() {
-  let clickCount = 0;
-  let clickTimeout;
-  rightZone.addEventListener('click', (e) => {
-    clickCount++;
-    clearTimeout(clickTimeout);
-    clickTimeout = setTimeout(() => {
-      if (clickCount === 1) {
-        console.log("Right zone single-click: Toggle play/pause");
-        togglePlayPause();
-      } else if (clickCount === 2) {
-        console.log("Right zone double-click: Seek video 15s forward");
-        zoneSeekVideo(15);
-        showGesturePopup("Forward 15s");
-      } else if (clickCount === 3) {
-        console.log("Right zone triple-click: Load next video");
-        loadNextVideo();
-        showGesturePopup("Next Video");
-      }
-      clickCount = 0;
-    }, 250);
-  });
-})();
+    // Create the message box element with the popup class
+    this.messageBox = document.createElement('div');
+    this.messageBox.classList.add('popup');
 
-// Center zone: single click toggles play/pause, double-click toggles fullscreen.
-(function() {
-  let clickCount = 0;
-  let clickTimeout;
-  centerZone.addEventListener('click', (e) => {
-    clickCount++;
-    clearTimeout(clickTimeout);
-    clickTimeout = setTimeout(() => {
-      if (clickCount === 1) {
-        console.log("Center zone single-click: Toggle play/pause");
-        togglePlayPause();
-      } else if (clickCount === 2) {
-        console.log("Center zone double-click: Toggle fullscreen");
-        toggleFullscreen();
-      }
-      clickCount = 0;
-    }, 250);
-  });
-})();
+    this.overlay.appendChild(this.messageBox);
+    document.body.appendChild(this.overlay);
 
-// Helper function to toggle play/pause of the video.
-function togglePlayPause() {
-  if (video.paused) {
-    video.play().then(() => {
-      showGesturePopup("Play");
-    }).catch(err => {
-      console.error("Error playing video:", err);
+    // Hide the popup when the overlay is clicked, but not when the message box is clicked
+    this.overlay.addEventListener('click', (e) => {
+      if (e.target === this.overlay) {
+        this.hide();
+      }
     });
-  } else {
+  }
+
+  show(message) {
+    this.messageBox.textContent = message;
+    this.overlay.classList.add('active');
+  }
+
+  hide() {
+    this.overlay.classList.remove('active');
+  }
+}
+
+// --- Initialize the new Popup when DOM is fully loaded ---
+document.addEventListener('DOMContentLoaded', () => {
+  const popup = new Popup();
+
+  // Optional sample: attach an event listener to a button with id 'openPopup' if it exists
+  const openPopupButton = document.querySelector('#openPopup');
+  if (openPopupButton) {
+    openPopupButton.addEventListener('click', () => {
+      popup.show('This is a modal popup!');
+    });
+  }
+
+  // For demonstration purposes, you can uncomment the line below to auto-show the popup on load
+  // popup.show('Welcome to DaokoTube!');
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
     video.pause();
-    showGesturePopup("Pause");
-  }
-}
-
-// Helper function to show gesture popup messages.
-function showGesturePopup(message) {
-  const gesturePopup = document.getElementById("gesturePopup");
-  if (!gesturePopup) return;
-  gesturePopup.textContent = message;
-  gesturePopup.classList.remove("active");
-  // Force reflow to allow re-animation if needed.
-  void gesturePopup.offsetWidth;
-  gesturePopup.classList.add("active");
-}
-
-// Add event listener to handle spacebar press for Play/Pause
-document.addEventListener('keydown', (e) => {
-  if (e.code === "Space" && !e.repeat) {
-    e.preventDefault(); // Prevent scrolling when space is pressed
-    togglePlayPause();
+  } else if (!video.paused) {
+    video.play();
   }
 });
-
-// Add event listener to handle F key press for toggling fullscreen
-document.addEventListener('keydown', (e) => {
-  if (e.code === "KeyF" && !e.repeat) {
-    e.preventDefault(); // Prevent default behavior
-    toggleFullscreen();
-  }
-});
-
-// Modify right arrow key handling to support multi-tap: single press seeks forward; double press loads next video.
-let rightArrowCount = 0;
-let rightArrowTimeout;
-document.addEventListener('keydown', (e) => {
-  if (e.code === "ArrowRight" && !e.repeat) {
-    e.preventDefault();
-    rightArrowCount++;
-    clearTimeout(rightArrowTimeout);
-    rightArrowTimeout = setTimeout(() => {
-      if (rightArrowCount === 1) {
-        // Single press: seek forward 15s.
-        zoneSeekVideo(15);
-        showGesturePopup("Forward 15s");
-      } else if (rightArrowCount === 2) {
-        // Double press: load next video.
-        loadNextVideo();
-        showGesturePopup("Next Video");
-      }
-      rightArrowCount = 0;
-    }, 250);
-  }
-});
-
-// Modify left arrow key handling to support multi-tap: single press seeks backward; double press loads previous video.
-let leftArrowCount = 0;
-let leftArrowTimeout;
-document.addEventListener('keydown', (e) => {
-  if (e.code === "ArrowLeft" && !e.repeat) {
-    e.preventDefault();
-    leftArrowCount++;
-    clearTimeout(leftArrowTimeout);
-    leftArrowTimeout = setTimeout(() => {
-      if (leftArrowCount === 1) {
-        // Single press: seek backward 15s.
-        zoneSeekVideo(-15);
-        showGesturePopup("Rewind 15s");
-      } else if (leftArrowCount === 2) {
-        // Double press: load previous video.
-        loadPreviousVideo();
-        showGesturePopup("Previous Video");
-      }
-      leftArrowCount = 0;
-    }, 250);
-  }
-});
-
-// Add event listener to handle up arrow key press for increasing volume
-document.addEventListener('keydown', (e) => {
-  if (e.code === "ArrowUp" && !e.repeat) {
-    e.preventDefault();
-    // Increase volume by 0.1 and clamp the value to 1.
-    video.volume = Math.min(video.volume + 0.1, 1);
-    if (video.volume === 1) {
-      showGesturePopup("Volume Max");
-    } else {
-      showGesturePopup("Volume +");
-    }
-  }
-});
-
-// Add event listener to handle down arrow key press for decreasing volume
-document.addEventListener('keydown', (e) => {
-  if (e.code === "ArrowDown" && !e.repeat) {
-    e.preventDefault();
-    // Decrease volume by 0.1 and clamp the value to 0.
-    video.volume = Math.max(video.volume - 0.1, 0);
-    if (video.volume === 0) {
-      showGesturePopup("Volume Min");
-    } else {
-      showGesturePopup("Volume -");
-    }
-  }
-});
-
-// Helper function to toggle fullscreen mode and display a popup.
-function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    video.requestFullscreen().then(() => {
-      showGesturePopup("Fullscreen");
-    }).catch(err => {
-      console.error(`Error attempting fullscreen: ${err.message}`);
-    });
-  } else {
-    document.exitFullscreen();
-    showGesturePopup("Windowed");
-  }
-}

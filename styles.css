@@ -108,8 +108,10 @@ body {
   transition: height 0.2s ease;
 }
 
-/* Add zoom effect when interacting */
-.progress-container.active {
+/* Grouped hover/active rules for progress-container */
+.progress-container.active,
+.progress-container:hover,
+#controls:hover .progress-container {
   height: 15px;
 }
 
@@ -117,11 +119,11 @@ body {
 .buffer-bar {
   width: 0%;             /* Start with no buffer shown */
   height: 100%;          /* Always match the progress container's height */
-  background-color: rgba(175, 175, 175, 0.77);  /* Lighter gray with 0.77 transparency */
-  position: absolute;    /* Position it absolutely within its container */
+  background-color: rgba(175, 175, 175, 0.77);
+  position: absolute;
   top: 0;
   left: 0;
-  pointer-events: none;  /* Prevent interference with user interactions */
+  pointer-events: none;
 }
 
 /* Progress bar */
@@ -137,45 +139,22 @@ body {
   pointer-events: none;
 }
 
-/* Responsive adjustments */
-@media only screen and (max-width: 768px) {
-  #controls {
-    height: 80px;
-  }
-  
-  #controls .progress {
-    height: 10px;
-  }
-}
-
-/* New hover rule */
-.progress-container:hover {
-  height: 15px;
-}
-
-/* Also zoom the progress container when hovering over the underlying controls panel */
-#controls:hover .progress-container {
-  height: 15px;
-}
-
 /* Timestamp popup for progress container */
 .timestamp-popup {
   position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  padding: 4px 8px;
-  font-size: 24px;
+  bottom: 30px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 5px 10px;
   border-radius: 4px;
+  font-size: 0.9em;
   pointer-events: none;
-  white-space: nowrap;
-  z-index: 10;
+  transform: translateX(-50%);
   display: none;
+  white-space: nowrap;
 }
 
-/* Optional: show an arrow on the popup */
+/* Arrow for timestamp popup */
 .timestamp-popup::after {
   content: "";
   position: absolute;
@@ -195,25 +174,63 @@ body {
   right: 0;
   bottom: 0;
   display: flex;
-  z-index: 10; /* Ensure zones are above the video */
-  pointer-events: none; /* Default: allow clicks to fall through if needed */
+  z-index: 10;
+  pointer-events: none;
 }
 
 .zone {
   flex: 1;
-  /* Allow zones to capture clicks */
   pointer-events: auto;
   background: transparent;
 }
 
-/* Optionally, add hover outlines for debugging -- remove when not needed */
-/*
-.zone:hover {
-  background: rgba(0, 0, 0, 0.1);
+/* Updated Popup Styling */
+.popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 1rem;
+  text-align: center;
+  border-radius: 8px;
+  z-index: 1000;
+  display: inline-block;
+  box-sizing: border-box;
+  word-wrap: break-word;
 }
-*/
+.popup.active {
+  display: inline-block;
+}
 
-/* Add the keyframes for the popup animation */
+/* Optionally, modify the gesture popup if needed */
+.gesture-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  width: 150px;
+  height: 150px;
+  font-size: 36px;
+  text-align: center;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  opacity: 0;
+}
+.gesture-popup.active {
+  animation: popupAnimation 1.5s forwards;
+}
+
+/* Popup animation keyframes */
 @keyframes popupAnimation {
   0% {
     opacity: 0;
@@ -233,29 +250,61 @@ body {
   }
 }
 
-/* Gesture popup styling */
-.gesture-popup {
-  position: fixed;
-  top: 40%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  min-width: 150px;
-  min-height: 150px;
-  padding: 20px;
-  font-size: 36px;
-  text-align: center;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 20;
-  opacity: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 1;
+/* Responsive adjustments for smaller screens and touch devices */
+@media only screen and (max-width: 768px), (pointer: coarse) {
+  #controls {
+    height: 80px;
+    padding: 16px;
+  }
+
+  .progress-container,
+  .progress-bar,
+  .buffer-bar {
+    height: 15px;
+  }
+
+  /* Optionally enlarge text within controls */
+  #controls * {
+    font-size: 24px;
+  }
 }
 
-.gesture-popup.active {
-  animation: popupAnimation 1.5s forwards;
+/* Popup Overlay Styles */
+.popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  visibility: hidden;
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.5);
+  transition: visibility 0.2s, opacity 0.2s;
+}
+
+.popup-overlay.active {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Popup Message Box Styles */
+.popup {
+  background-color: #fff;
+  color: #000;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  font-size: 1rem;
+  max-width: 80%;
+  text-align: center;
+}
+
+#gesturePopup {
+    transition: 
+        opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
