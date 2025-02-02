@@ -9,6 +9,17 @@ class VideoController {
     this.commandQueue = [];
     this.isProcessingQueue = false;
     this.currentLoadAbortController = null;
+
+    // New properties for merged video navigation
+    this.videoSources = [];
+    this.currentVideoIndex = -1;
+    this.isLoading = false;
+    this.preloadedVideoUrl = null;
+
+    // Optional callbacks for UI updates
+    this.onAutoplayBlocked = null;
+    this.onLoadFailed = null;
+    this.onSpinnerUpdate = null;
   }
 
   async queueCommand(commandFn, timeout = 5000) {
@@ -137,6 +148,69 @@ class VideoController {
 
   clearQueue() {
     this.commandQueue = [];
+  }
+
+  async loadVideoByDirection(direction, retries = 0) {
+    // direction: +1 for next, -1 for previous
+    if (this.isLoading || !this.videoSources.length) return;
+    this.isLoading = true;
+    try {
+      // Pause current playback and clear the source
+      await this.pause();
+      this.video.src = "";
+      await new Promise(resolve => requestAnimationFrame(resolve));
+
+      if (direction > 0) {
+        // Next video
+        if (this.preloadedVideoUrl) {
+          this.currentVideoIndex = (this.currentVideoIndex + 1) % this.videoSources.length;
+          await this.loadVideo(Promise.resolve(this.preloadedVideoUrl));
+          console.log('Loaded preloaded video URL:', this.preloadedVideoUrl);
+          this.preloadedVideoUrl = null;
+        } else {
+          this.currentVideoIndex = (this.currentVideoIndex + 1) % this.videoSources.length;
+          const cid = this.videoSources[this.currentVideoIndex];
+          console.log('Attempting to load video with CID:', cid);
+          const url = await loadVideoFromCid(cid);
+          console.log('Loaded video URL:', url);
+          await this.loadVideo(Promise.resolve(url));
+        }
+      } else {
+        // Previous video
+        this.currentVideoIndex = (this.currentVideoIndex - 1 + this.videoSources.length) % this.videoSources.length;
+        const cid = this.videoSources[this.currentVideoIndex];
+        console.log('Attempting to load previous video with CID:', cid);
+        const url = await loadVideoFromCid(cid);
+        console.log('Loaded video URL:', url);
+        await this.loadVideo(Promise.resolve(url));
+      }
+
+      // Attempt playback with muted fallback
+      try {
+        this.video.muted = true;
+        await this.video.play();
+        this.video.muted = false;
+        // Optionally, trigger preloading of the next video here if a preloadNextVideo method exists
+        if (direction > 0 && typeof this.preloadNextVideo === 'function') {
+          this.preloadNextVideo();
+        }
+      } catch (error) {
+        console.error('Autoplay blocked', error);
+        if (this.onAutoplayBlocked) this.onAutoplayBlocked();
+      }
+    } catch (error) {
+      console.error('Error loading video:', error);
+      if (retries < this.videoSources.length) {
+        console.log(`Retrying (${retries + 1}/${this.videoSources.length})...`);
+        setTimeout(() => this.loadVideoByDirection(direction, retries + 1), 0);
+      } else {
+        console.error('All videos failed to load after maximum retries.');
+        if (this.onLoadFailed) this.onLoadFailed();
+      }
+    } finally {
+      this.isLoading = false;
+      if (this.onSpinnerUpdate) this.onSpinnerUpdate();
+    }
   }
 }
 
