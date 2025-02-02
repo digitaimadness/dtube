@@ -69,61 +69,68 @@ const getProviderUrl = (provider, cid) =>
     ? `https://${cid}.ipfs.${provider}`
     : `https://ipfs.${provider}/ipfs/${cid}`;
 
-/**
- * Loads video sources from different providers until one works.
- */
+/* Insert new helper function testProvider before loadVideoFromCid */
+function testProvider(url) {
+  return new Promise((resolve, reject) => {
+    const testVideo = document.createElement('video');
+    testVideo.style.display = 'none';
+    let resolved = false;
+    const cleanup = () => {
+      testVideo.remove();
+      clearTimeout(timeout);
+    };
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        reject(new Error('Timeout'));
+      }
+    }, LOAD_TIMEOUT);
+    testVideo.addEventListener('canplay', () => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        resolve(url);
+      }
+    }, { once: true });
+    testVideo.addEventListener('error', () => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        reject(new Error('Error loading video'));
+      }
+    }, { once: true });
+    testVideo.src = url;
+    document.body.appendChild(testVideo);
+  });
+}
+
+/* Optimized loadVideoFromCid using testProvider and Promise.any */
 async function loadVideoFromCid(cid) {
-  const cachedUrl = localStorage.getItem(getCacheKey(cid));
+  const cacheKey = getCacheKey(cid);
+  const cachedUrl = localStorage.getItem(cacheKey);
   if (cachedUrl) return cachedUrl;
 
-  const providerPromises = PROVIDERS.map(provider => 
-    new Promise(async (resolve) => {
+  const prioritizedProviders = ['io', 'dweb.link'];
+  const fallbackProviders = PROVIDERS.filter(provider => !prioritizedProviders.includes(provider));
+
+  let validUrl;
+  try {
+    const prioritizedPromises = prioritizedProviders.map(provider => {
       const url = getProviderUrl(provider, cid);
-      const testVideo = document.createElement("video");
-      testVideo.style.display = "none";
-
-      const cleanup = () => {
-        testVideo.remove();
-        clearTimeout(timeout);
-      };
-
-      const timeout = setTimeout(() => {
-        cleanup();
-        resolve(null);
-      }, LOAD_TIMEOUT);
-
-      try {
-        await new Promise((resolve, reject) => {
-          testVideo.addEventListener('canplay', () => {
-            cleanup();
-            resolve(url);
-          }, { once: true });
-          
-          testVideo.addEventListener('error', () => {
-            cleanup();
-            resolve(null);
-          }, { once: true });
-
-          testVideo.src = url;
-          document.body.appendChild(testVideo);
-        });
-        resolve(url);
-      } catch {
-        resolve(null);
-      }
-    })
-  );
-
-  // Race all providers with fallback to first successful
-  const results = await Promise.all(providerPromises);
-  const validUrl = results.find(url => url !== null);
-  
-  if (validUrl) {
-    localStorage.setItem(getCacheKey(cid), validUrl);
-    return validUrl;
+      return testProvider(url);
+    });
+    validUrl = await Promise.any(prioritizedPromises);
+  } catch (error) {
+    const fallbackPromises = fallbackProviders.map(provider => {
+      const url = getProviderUrl(provider, cid);
+      return testProvider(url);
+    });
+    validUrl = await Promise.any(fallbackPromises);
   }
-  
-  throw new Error(`All providers failed for CID ${cid}`);
+
+  localStorage.setItem(cacheKey, validUrl);
+  return validUrl;
 }
 
 /**
