@@ -347,16 +347,63 @@ class FrameAnalyzer {
     this.ctx = this.canvas.getContext('2d');
     this.canvas.width = FrameAnalyzer.samplingWidth;
     this.canvas.height = FrameAnalyzer.samplingHeight;
+    if (window.Worker) {
+      const workerCode = `
+        function rgbToHue(r, g, b) {
+          r /= 255;
+          g /= 255;
+          b /= 255;
+          const max = Math.max(r, g, b), min = Math.min(r, g, b);
+          let hue;
+          if (max === min) { hue = 0; } 
+          else if (max === r) { hue = (60 * ((g - b) / (max - min)) + 360) % 360; } 
+          else if (max === g) { hue = (60 * ((b - r) / (max - min)) + 120) % 360; } 
+          else { hue = (60 * ((r - g) / (max - min)) + 240) % 360; }
+          return hue;
+        }
+        self.onmessage = function(e) {
+          const { data, samplingWidth, samplingHeight, pixelStep } = e.data;
+          let r = 0, g = 0, b = 0;
+          for (let i = 0; i < data.length; i += pixelStep) {
+            r += data[i];
+            g += data[i + 1];
+            b += data[i + 2];
+          }
+          const totalPixels = (data.length / 4) * (4 / pixelStep);
+          const avgR = r / totalPixels;
+          const avgG = g / totalPixels;
+          const avgB = b / totalPixels;
+          const hue = rgbToHue(avgR, avgG, avgB);
+          self.postMessage({ hue: hue });
+        };
+      `;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      this.worker = new Worker(URL.createObjectURL(blob));
+    } else {
+      this.worker = null;
+    }
   }
 
   getDominantHue(video) {
     try {
       this.ctx.drawImage(video, 0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
-      const imageData = this.ctx.getImageData(0, 0, 
-        FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
-      return this.calculateAverageHue(imageData.data);
+      const imageData = this.ctx.getImageData(0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
+      if (this.worker) {
+        return new Promise((resolve, reject) => {
+          const handleMessage = (e) => { resolve(e.data.hue); };
+          this.worker.addEventListener('message', handleMessage, { once: true });
+          this.worker.postMessage({ 
+            data: imageData.data, 
+            samplingWidth: FrameAnalyzer.samplingWidth, 
+            samplingHeight: FrameAnalyzer.samplingHeight, 
+            pixelStep: FrameAnalyzer.PIXEL_STEP 
+          });
+        });
+      } else {
+        return this.calculateAverageHue(imageData.data);
+      }
     } catch (error) {
-      console.warn("Frame analysis error:", error);
+      console.warn('Frame analysis error:', error);
       return 0;
     }
   }
@@ -450,48 +497,26 @@ class UIController {
   }
 
   bindEvents() {
-    // Progress container events
+    // Attach unified pointer events on the video-wrapper
+    const wrapper = document.querySelector('.video-wrapper');
+    const throttledUnifiedPointerEvent = throttle((e) => { this.handleUnifiedPointerEvent(e); }, 16);
+
+    wrapper.addEventListener('pointerdown', (e) => this.handleUnifiedPointerEvent(e));
+    wrapper.addEventListener('pointermove', throttledUnifiedPointerEvent);
+    wrapper.addEventListener('pointerup', (e) => this.handleUnifiedPointerEvent(e));
+    wrapper.addEventListener('pointercancel', (e) => this.handleUnifiedPointerEvent(e));
+
+    // Retain caching for progress container dimensions
     this.controls.progressContainer.addEventListener('pointerenter', () => {
       this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
     });
-
     this.controls.progressContainer.addEventListener('pointerleave', () => {
       this.state.cachedRect = null;
     });
-
     window.addEventListener('resize', () => {
       if (this.state.cachedRect) {
         this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
       }
-    });
-
-    // Pointer events - update throttle to 16ms and ensure position updates
-    const throttledPointerMove = throttle((e) => {
-      const position = this.calculateSeekPosition(e.clientX);
-      this.updateTimestampPopupPreview(position.offsetX);
-      if (this.state.isDragging) {
-        this.video.currentTime = position.time;
-        this.updatePlaybackProgress(this.video);
-        this.updateTimestampPopupPreview(position.offsetX); // Immediate update
-      }
-    }, 16); // 60fps update rate
-
-    this.controls.progressContainer.addEventListener('pointermove', throttledPointerMove);
-    this.controls.progressContainer.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
-    this.controls.progressContainer.addEventListener('pointerup', (e) => this.handlePointerUp(e));
-    this.controls.progressContainer.addEventListener('pointercancel', (e) => this.handlePointerUp(e));
-
-    // Add timestamp popup drag handlers
-    this.timestampPopup.addEventListener('pointerdown', (e) => {
-      this.handlePopupDragStart(e);
-    });
-    
-    document.addEventListener('pointermove', (e) => {
-      this.handlePopupDragMove(e);
-    });
-    
-    document.addEventListener('pointerup', (e) => {
-      this.handlePopupDragEnd(e);
     });
   }
 
@@ -724,7 +749,11 @@ class UIController {
   }
 
   calculateSeekPosition(clientX) {
-    const rect = this.controls.progressContainer.getBoundingClientRect();
+    let rect = this.state.cachedRect;
+    if (!rect) {
+      rect = this.controls.progressContainer.getBoundingClientRect();
+      this.state.cachedRect = rect;
+    }
     let offsetX = clientX - rect.left;
     offsetX = Math.max(0, Math.min(offsetX, rect.width));
     const percent = offsetX / rect.width;
@@ -759,6 +788,37 @@ class UIController {
     this.controlsTimeout = setTimeout(() => {
       this.hideControls();
     }, CONTROLS_TIMEOUT);
+  }
+
+  handleUnifiedPointerEvent(e) {
+    const target = e.target;
+    if (target.closest('.progress-container')) {
+      if (e.type === 'pointerdown') {
+        this.handlePointerDown(e);
+      } else if (e.type === 'pointermove') {
+        this.handlePointerMove(e);
+      } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
+        this.handlePointerUp(e);
+      }
+    } else if (target.closest('.timestamp-popup')) {
+      if (e.type === 'pointerdown') {
+        this.handlePopupDragStart(e);
+      } else if (e.type === 'pointermove') {
+        this.handlePopupDragMove(e);
+      } else if (e.type === 'pointerup' || e.type === 'pointercancel') {
+        this.handlePopupDragEnd(e);
+      }
+    }
+    // Additional unified handling for toggling fullscreen or other events can be added here if needed
+  }
+
+  handlePointerMove(e) {
+    const position = this.calculateSeekPosition(e.clientX);
+    this.updateTimestampPopupPreview(position.offsetX);
+    if (this.state.isDragging) {
+      this.video.currentTime = position.time;
+      this.updatePlaybackProgress(this.video);
+    }
   }
 
   handlePointerDown(e) {
@@ -822,11 +882,15 @@ class UIController {
       this.updateTimestampPopupPreview(offsetX);
     }
 
-    // Update hue more frequently (changed from 500ms to 100ms)
-    if (Date.now() - this.lastHueUpdate >= 100) {
+    // Update hue at most every 200ms
+    if (Date.now() - this.lastHueUpdate >= 200) {
       if (!this.video.paused && this.video.readyState >= 2) {
-        const hue = this.frameAnalyzer.getDominantHue(this.video);
-        this.updateProgressBarColor(hue);
+        const hueResult = this.frameAnalyzer.getDominantHue(this.video);
+        if (hueResult && typeof hueResult.then === 'function') {
+          hueResult.then((hue) => this.updateProgressBarColor(hue));
+        } else {
+          this.updateProgressBarColor(hueResult);
+        }
       }
       this.lastHueUpdate = Date.now();
     }
@@ -872,17 +936,6 @@ class UIController {
     this.video.currentTime = position.time;
     this.updatePlaybackProgress();
     this.updateTimestampPopupPreview(position.offsetX);
-  }
-
-  // Simplified event handler - add spinner update
-  handlePointerMove(e) {
-    const position = this.calculateSeekPosition(e.clientX);
-    // Update both elements simultaneously
-    this.updateTimestampPopupPreview(position.offsetX);
-    if (this.state.isDragging) {
-      this.updatePopupPosition(e.clientX);
-    }
-    this.updateSpinner();
   }
 
   updateSpinner() {
@@ -1133,33 +1186,25 @@ function getCacheKey(cid) {
   return `video_${cid}`;
 }
 
-// Wrap hue initialization in a safety check
+/* Modified initHueEffects function */
 function initHueEffects() {
   // Ensure video element exists before initializing effects
   const video = document.getElementById('videoPlayer');
   if (!video) return;
 
   let hue = 0;
-  let isAnimating = false; // Track animation state
-
   function updateHue() {
     hue = (hue + 1) % 360;
     document.documentElement.style.setProperty('--main-hue', hue);
   }
 
-  function animateHue() {
-    if (!isAnimating) return; // Exit if animation stopped
-    updateHue();
-    requestAnimationFrame(animateHue);
-  }
-
-  document.addEventListener('click', () => {
-    updateHue();
-  });
-
-  document.addEventListener('scroll', () => {
-    updateHue();
-  });
+  // Attach noncritical event listeners only after video starts playing
+  video.addEventListener('playing', function attachHueListeners() {
+    document.addEventListener('click', updateHue);
+    document.addEventListener('scroll', updateHue);
+    // Remove this listener since it's no longer needed
+    video.removeEventListener('playing', attachHueListeners);
+  }, { once: true });
 }
 
 // Update the DOMContentLoaded event listener at the end of the file
@@ -1168,19 +1213,20 @@ document.addEventListener('DOMContentLoaded', function() {
   if (video) {
     // Initialize hue effects after video is confirmed available
     initHueEffects();
-
-    // Only set timeout if video hasn't loaded anything yet
-    if (video.readyState < 1) { // 0 = HAVE_NOTHING
+    if (video.readyState < 1) { // video not loaded yet
       let loadTimeout = setTimeout(() => {
         if (video.readyState < 1) {
           playNextVideo();
         }
       }, 4000);
-
-      // Clear timeout if video loads
+      
       video.addEventListener('loadeddata', () => {
         clearTimeout(loadTimeout);
-      });
+        preloadNextVideo();
+      }, { once: true });
+    } else {
+      // If video is already loaded, immediately start preloading next video
+      preloadNextVideo();
     }
   }
 });
