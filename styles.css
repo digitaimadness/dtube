@@ -140,7 +140,7 @@ body {
   height: 100%;
   background-color: #4caf50;
   z-index: 2;
-  transition: width 0.3s ease;
+  transition: width 0.2s linear;
   pointer-events: none;
 }
 
@@ -157,46 +157,41 @@ body {
   transition: none; /* Parent container handles transitions */
 }
 
-/* Timestamp popup for progress container */
+/* Update timestamp popup styles to match gesture popup */
 .timestamp-popup {
   position: absolute;
-  bottom: 20px;
+  bottom: 10px;
   padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 0.95em;
-  font-weight: 500;
+  border-radius: 20px;
+  font-size: 1.1em;
+  font-weight: bold;
   transform: translateX(-50%);
+  transform-origin: center bottom;
   opacity: 0;
-  display: block;
+  display: block !important;
+  pointer-events: auto !important;
   cursor: grab;
-  pointer-events: auto;
-  transition: opacity 0.2s ease;
-  backdrop-filter: blur(2px);
-  border: 1px solid rgba(255,255,255,0.1);
+  transition: left 0.05s linear !important;
+  will-change: left, transform;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  border: 2px solid transparent;
+  background: rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  touch-action: none; /* Prevent touch scrolling */
+  user-select: none; /* Prevent text selection */
 }
 
-/* Remove the arrow from timestamp popup */
+/* Update hover state */
+.progress-container:hover .timestamp-popup {
+  transform: translateX(-50%) scale(1.1);
+  opacity: 1;
+}
+
+/* Remove the border from original styles */
 .timestamp-popup::after {
   content: none;
-}
-
-/* Hover state for timestamp */
-.progress-container:hover .timestamp-popup {
-  transform: translateX(-50%) scale(0.9);
-  opacity: 0.8;
-}
-
-/* Update progress container transitions */
-.progress-container {
-  touch-action: none;
-  position: relative;
-  flex: 1;
-  height: 4px;
-  background-color: transparent;
-  overflow: visible;
-  margin: 0;
-  cursor: pointer;
-  transition: opacity 0.3s ease;
 }
 
 /* Interaction zones covering the whole video screen */
@@ -320,4 +315,25 @@ body {
 }
 .progress-bar {
   z-index: 2;
+}
+
+.progress-bar.dragging {
+  transition: none;
+}
+
+.progress-container {
+    touch-action: none;
+    position: relative;
+    flex: 1;
+    height: 4px;
+    background-color: transparent;
+    overflow: visible;
+    margin: 0;
+    cursor: pointer;
+    transition: opacity 0.3s ease;
+    z-index: 100; /* Ensure proper layering */
+}
+
+.timestamp-popup:active {
+    cursor: grabbing;
 }

@@ -376,8 +376,21 @@ class UIController {
   createTimestampPopup() {
     this.timestampPopup = document.createElement('div');
     this.timestampPopup.className = 'timestamp-popup';
+    this.timestampPopup.style.cssText = `
+        position: absolute;
+        bottom: 50px;
+        transform: translateX(-50%);
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.9em;
+        font-weight: bold;
+        backdrop-filter: blur(4px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        transition: opacity 0.2s ease;
+        display: none;
+        cursor: grab;
+    `;
     this.controls.progressContainer.appendChild(this.timestampPopup);
-    this.timestampPopup.style.willChange = 'left, transform, opacity';
   }
 
   createProgressBackground() {
@@ -406,11 +419,16 @@ class UIController {
       }
     });
 
-    // Pointer events
+    // Pointer events - update throttle to 16ms and ensure position updates
     const throttledPointerMove = throttle((e) => {
-      this.updateTimestampPopupPreview(e.clientX);
-      if (this.state.isDragging) this.seek(e.clientX);
-    }, 100);
+      const position = this.calculateSeekPosition(e.clientX);
+      this.updateTimestampPopupPreview(position.offsetX);
+      if (this.state.isDragging) {
+        this.video.currentTime = position.time;
+        this.updatePlaybackProgress(this.video);
+        this.updateTimestampPopupPreview(position.offsetX); // Immediate update
+      }
+    }, 16); // 60fps update rate
 
     this.controls.progressContainer.addEventListener('pointermove', throttledPointerMove);
     this.controls.progressContainer.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
@@ -460,11 +478,12 @@ class UIController {
 
   updateProgressBarColor(hue) {
     if (this.controls.progressBar) {
-      this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
-      // Update timestamp text color to match progress bar
-      this.timestampPopup.style.color = `hsl(${hue}, 70%, 95%)`;
-      // Update background with matching hue but lower saturation/lightness
-      this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
+        this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
+        // Update timestamp popup styles to match
+        this.timestampPopup.style.backgroundColor = `hsla(${hue}, 70%, 50%, 0.2)`;
+        this.timestampPopup.style.border = `2px solid hsla(${hue}, 70%, 35%, 0.8)`;
+        this.timestampPopup.style.color = `hsl(${hue}, 70%, 95%)`;
+        this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
     }
   }
 
@@ -479,7 +498,8 @@ class UIController {
     
     this.timestampPopup.textContent = popupText;
     this.timestampPopup.style.left = `${adjustedX}px`;
-    this.timestampPopup.style.opacity = '1'; // Force opacity to 1
+    this.timestampPopup.style.opacity = '1';
+    this.timestampPopup.style.display = 'block';
   }
 
   showGesturePopup(message, clickPos) {
@@ -654,16 +674,25 @@ class UIController {
     }
   }
 
-  seek(clientX) {
-    this.resetControlsTimeout();
+  calculateSeekPosition(clientX) {
     const rect = this.controls.progressContainer.getBoundingClientRect();
     let offsetX = clientX - rect.left;
     offsetX = Math.max(0, Math.min(offsetX, rect.width));
     const percent = offsetX / rect.width;
+    return {
+      time: percent * this.video.duration,
+      offsetX: offsetX
+    };
+  }
+
+  seek(clientX) {
+    this.resetControlsTimeout();
+    const position = this.calculateSeekPosition(clientX);
     if (this.video.duration) {
-      this.video.currentTime = percent * this.video.duration;
+        this.video.currentTime = position.time;
+        this.updatePlaybackProgress(this.video);
+        this.updateTimestampPopupPreview(position.offsetX); // Force position update
     }
-    this.updatePlaybackProgress(this.video);
   }
 
   initActivityMonitoring() {
@@ -688,8 +717,10 @@ class UIController {
     this.state.isDragging = true;
     this.showControls();
     this.controls.progressContainer.setPointerCapture(e.pointerId);
-    this.seek(e.clientX);
+    this.seek(e.clientX); // Direct seek on pointer down
     this.timestampPopup.style.display = 'block';
+    this.controls.progressBar.classList.add('dragging');
+    this.updateTimestampPopupPreview(this.calculateSeekPosition(e.clientX).offsetX); // Initial position
   }
 
   handlePointerUp(e) {
@@ -699,6 +730,7 @@ class UIController {
       this.controls.progressContainer.classList.remove("active");
       this.controls.progressContainer.releasePointerCapture(e.pointerId);
       this.hideTimestampPopup();
+      this.controls.progressBar.classList.remove('dragging');
     }
   }
 
@@ -749,24 +781,34 @@ class UIController {
   }
 
   handlePopupDragStart(e) {
+    e.preventDefault();
     this.state.isDraggingPopup = true;
-    this.state.cachedRect = this.controls.progressContainer.getBoundingClientRect();
-    this.seek(e.clientX);
+    const position = this.calculateSeekPosition(e.clientX);
+    this.video.currentTime = position.time;
+    this.controls.progressBar.style.width = `${(position.time / this.video.duration) * 100}%`;
+    this.timestampPopup.style.cursor = 'grabbing';
+    this.timestampPopup.setPointerCapture(e.pointerId);
   }
 
   handlePopupDragMove(e) {
     if (this.state.isDraggingPopup) {
-      this.seek(e.clientX);
-      // Manually update popup position during drag
-      const rect = this.state.cachedRect;
-      const offsetX = e.clientX - rect.left;
-      this.updateTimestampPopupPreview(offsetX);
+      const position = this.calculateSeekPosition(e.clientX);
+      this.video.currentTime = position.time;
+      this.controls.progressBar.style.width = `${(position.time / this.video.duration) * 100}%`;
+      this.updateTimestampPopupPreview(position.offsetX);
     }
   }
 
   handlePopupDragEnd(e) {
     this.state.isDraggingPopup = false;
     this.state.cachedRect = null;
+    this.controls.progressBar.classList.remove('dragging');
+    this.timestampPopup.style.cursor = 'grab';
+    this.timestampPopup.releasePointerCapture(e.pointerId);
+  }
+
+  hideTimestampPopup() {
+    this.timestampPopup.style.opacity = '0';
   }
 }
 
