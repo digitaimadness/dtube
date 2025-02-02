@@ -72,51 +72,69 @@ const getProviderUrl = (provider, cid) =>
 /**
  * Loads video sources from different providers until one works.
  */
-function loadVideoFromCid(cid) {
+async function loadVideoFromCid(cid) {
   // Check cache first
   const cachedUrl = localStorage.getItem(getCacheKey(cid));
   if (cachedUrl) {
-    return Promise.resolve(cachedUrl);
+    return cachedUrl;
   }
 
-  const promises = PROVIDERS.map(provider => {
-    return new Promise((resolve, reject) => {
-      const url = getProviderUrl(provider, cid);
-      const testVideo = document.createElement("video");
-      testVideo.style.display = "none";
+  // Try providers one by one sequentially
+  for (const provider of PROVIDERS) {
+    const url = getProviderUrl(provider, cid);
+    try {
+      const loadedUrl = await new Promise((resolve, reject) => {
+        const testVideo = document.createElement("video");
+        testVideo.style.display = "none";
 
-      const cleanup = () => testVideo.remove();
+        // Cleanup helper: clear timeout and remove video element from DOM
+        const cleanup = () => {
+          clearTimeout(timeout);
+          testVideo.remove();
+        };
 
-      testVideo.addEventListener(
-        "canplay",
-        () => {
+        // Apply a timeout for this provider attempt
+        const timeout = setTimeout(() => {
           cleanup();
-          // Cache successful URL
-          localStorage.setItem(getCacheKey(cid), url);
-          resolve(url);
-        },
-        { once: true }
-      );
+          reject(new Error(`Provider ${provider} timed out for CID ${cid}`));
+        }, LOAD_TIMEOUT);
 
-      testVideo.addEventListener(
-        "error",
-        () => {
-          cleanup();
-          reject(new Error(`Provider ${provider} failed for CID ${cid}`));
-        },
-        { once: true }
-      );
+        // Success event listener
+        testVideo.addEventListener(
+          "canplay",
+          () => {
+            cleanup();
+            resolve(url);
+          },
+          { once: true }
+        );
 
-      testVideo.src = url;
-      testVideo.preload = "auto";
-      testVideo.load();
-      document.body.appendChild(testVideo);
-    });
-  });
+        // Error event listener
+        testVideo.addEventListener(
+          "error",
+          () => {
+            cleanup();
+            reject(new Error(`Provider ${provider} failed for CID ${cid}`));
+          },
+          { once: true }
+        );
 
-  return Promise.any(promises).catch(errors => {
-    throw new Error(`All providers failed for CID ${cid}: ${errors}`);
-  });
+        testVideo.src = url;
+        testVideo.preload = "auto";
+        testVideo.load();
+        document.body.appendChild(testVideo);
+      });
+
+      // Cache and return the successful URL
+      localStorage.setItem(getCacheKey(cid), loadedUrl);
+      return loadedUrl;
+    } catch (error) {
+      console.warn(error.message);
+      // continue to the next provider in case of failure
+    }
+  }
+
+  throw new Error(`All providers failed for CID ${cid}`);
 }
 
 /**
@@ -361,6 +379,8 @@ class FrameAnalyzer {
 class UIController {
   constructor(video) {
     this.video = video;
+    this.isLoading = false;
+    
     this.controlsTimeout = null;
     this.controls = {
       progressContainer: document.querySelector('.progress-container'),
@@ -380,7 +400,9 @@ class UIController {
       lastPopupOffsetX: null,
       lastPopupText: null,
       multiTapState: {},
-      arrowTimeout: null
+      arrowTimeout: null,
+      bufferingTimeout: null,
+      isBuffering: false
     };
 
     this.frameAnalyzer = new FrameAnalyzer();
@@ -864,13 +886,57 @@ class UIController {
   }
 
   updateSpinner() {
-    const showSpinner = isLoading || isBuffering;
-    this.controls.spinner.style.display = showSpinner ? "block" : "none";
+    // Use instance property for loading and internal state for buffering
+    const loading = this.isLoading;
+    const buffering = this.state.isBuffering;
+    // Only show the spinner when video is ready enough (readyState>=2 ensures data is available)
+    const shouldShowSpinner = (loading || buffering) && (this.video.readyState >= 2);
     
-    // Only calculate hue when spinner is visible
-    if (showSpinner) {
-      const currentHue = this.frameAnalyzer.getDominantHue(this.video);
-      this.controls.spinner.style.borderTopColor = `hsl(${currentHue}, 70%, 50%)`;
+    this.controls.spinner.style.display = shouldShowSpinner ? "block" : "none";
+    
+    if (shouldShowSpinner) {
+      // Only compute hue if video is ready; otherwise, fall back to a default hue
+      if (this.video.readyState >= 2) {
+        const currentHue = this.frameAnalyzer.getDominantHue(this.video);
+        this.controls.spinner.style.borderTopColor = `hsl(${currentHue}, 70%, 50%)`;
+      } else {
+        this.controls.spinner.style.borderTopColor = 'hsl(0, 70%, 50%)';
+      }
+    }
+  }
+
+  handleBufferingStart() {
+    if (!this.state.isBuffering) {
+      this.state.isBuffering = true;
+      this.updateSpinner();
+    }
+    
+    // Clear any existing buffering timeout
+    if (this.state.bufferingTimeout) clearTimeout(this.state.bufferingTimeout);
+    
+    // Set a timeout and verify buffering state before proceeding
+    this.state.bufferingTimeout = setTimeout(() => {
+      // Only trigger if buffering persists after 2 seconds
+      if (this.state.isBuffering) {
+        // Increment currentVideoIndex to skip the problematic video
+        currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+        // End the buffering state before loading next video
+        this.state.isBuffering = false;
+        this.updateSpinner();
+        // Call loadNextVideo to load the next video in the list
+        loadNextVideo();
+      }
+    }, 2000);
+  }
+
+  handleBufferingEnd() {
+    if (this.state.isBuffering) {
+      this.state.isBuffering = false;
+      this.updateSpinner();
+    }
+    if (this.state.bufferingTimeout) {
+      clearTimeout(this.state.bufferingTimeout);
+      this.state.bufferingTimeout = null;
     }
   }
 }
@@ -888,27 +954,14 @@ function registerVideoEventListeners() {
 
   // Add these new event listeners
   video.addEventListener("waiting", () => {
-    if (!isBuffering) {
-      isBuffering = true;
+    if (controlsSystem) {
+      controlsSystem.handleBufferingStart();
     }
-    // Clear any existing timeout
-    if (this.bufferingTimeout) clearTimeout(this.bufferingTimeout);
-    
-    // Set new timeout for 2000ms (2 seconds)
-    this.bufferingTimeout = setTimeout(() => {
-        switchVideoProvider(); // Existing provider switching function
-        showLoadingIndicator(false); // Hide loading after switch
-    }, 2000); // Changed from previous value (likely 3000) to 2000
   });
 
   video.addEventListener("playing", () => {
-    if (isBuffering) {
-      isBuffering = false;
-    }
-    // Clear timeout when playback resumes
-    if (this.bufferingTimeout) {
-        clearTimeout(this.bufferingTimeout);
-        showLoadingIndicator(false);
+    if (controlsSystem) {
+      controlsSystem.handleBufferingEnd();
     }
   });
 
@@ -1080,67 +1133,84 @@ function getCacheKey(cid) {
   return `video_${cid}`;
 }
 
+// Wrap hue initialization in a safety check
 function initHueEffects() {
-    // Merged hue rotation logic into single handler
-    let hue = 0;
-    
-    function updateHue() {
-        hue = (hue + 1) % 360;
-        document.documentElement.style.setProperty('--main-hue', hue);
+  // Ensure video element exists before initializing effects
+  const video = document.getElementById('videoPlayer');
+  if (!video) return;
+
+  let hue = 0;
+  let isAnimating = false; // Track animation state
+
+  function updateHue() {
+    hue = (hue + 1) % 360;
+    document.documentElement.style.setProperty('--main-hue', hue);
+  }
+
+  function animateHue() {
+    if (!isAnimating) return; // Exit if animation stopped
+    updateHue();
+    requestAnimationFrame(animateHue);
+  }
+
+  document.addEventListener('click', () => {
+    updateHue();
+    // Only start animation if not already running
+    if (!isAnimating) {
+      isAnimating = true;
+      animateHue();
     }
+  });
 
-    // Combined animation and interaction handlers
-    const animateHue = () => {
-        updateHue();
-        requestAnimationFrame(animateHue);
-    };
-    
-    document.addEventListener('click', () => {
-        updateHue();
-        animateHue();
-    });
-
-    document.addEventListener('scroll', () => {
-        updateHue();
-    });
+  document.addEventListener('scroll', () => {
+    updateHue();
+    // Stop continuous animation on scroll
+    isAnimating = false;
+  });
 }
 
-// Initialize all hue-related effects
-initHueEffects();
-// Removed duplicate hue-related functions
-
-function updateDisplay() {
-    const progress = (video.currentTime / video.duration) * 100;
-    controlsSystem.controls.progressBar.style.width = progress + '%';
-    controlsSystem.timestampPopup.textContent = formatTime(video.currentTime);
-    requestAnimationFrame(updateDisplay); // Add this for continuous updates
-}
-
-function playAudio() {
-    video.play();
-    requestAnimationFrame(updateDisplay); // Start the update loop
-}
-
-// Add this event listener for real-time sync during drag
-controlsSystem.controls.progressContainer.addEventListener('input', () => {
-    const seekTime = (controlsSystem.controls.progressBar.value / 100) * video.duration;
-    video.currentTime = seekTime;
-    controlsSystem.timestampPopup.textContent = formatTime(seekTime);
-});
-
+// Update the DOMContentLoaded event listener at the end of the file
 document.addEventListener('DOMContentLoaded', function() {
   const video = document.getElementById('videoPlayer');
   if (video) {
-    // Add video load timeout
-    let loadTimeout = setTimeout(() => {
-      if (video.readyState < 1) { // 0 = HAVE_NOTHING
-        playNextVideo();
-      }
-    }, 4000);
+    // Initialize hue effects after video is confirmed available
+    initHueEffects();
 
-    // Clear timeout if video loads
-    video.addEventListener('loadeddata', () => {
-      clearTimeout(loadTimeout);
-    });
+    // Only set timeout if video hasn't loaded anything yet
+    if (video.readyState < 1) { // 0 = HAVE_NOTHING
+      let loadTimeout = setTimeout(() => {
+        if (video.readyState < 1) {
+          playNextVideo();
+        }
+      }, 4000);
+
+      // Clear timeout if video loads
+      video.addEventListener('loadeddata', () => {
+        clearTimeout(loadTimeout);
+      });
+    }
   }
 });
+
+// Modified updateDisplay function with safety checks
+function updateDisplay() {
+  // Only update if video has valid duration and is playing
+  if (video.duration > 0 && !video.paused) {
+    const progress = (video.currentTime / video.duration) * 100;
+    controlsSystem.controls.progressBar.style.width = progress + '%';
+    controlsSystem.timestampPopup.textContent = formatTime(video.currentTime);
+    requestAnimationFrame(updateDisplay);
+  }
+}
+
+// Updated playAudio function with proper loop handling
+function playAudio() {
+  video.play().then(() => {
+    // Only start the loop if playback succeeded
+    if (!video.paused) {
+      updateDisplay();
+    }
+  }).catch(error => {
+    console.error('Playback failed:', error);
+  });
+}
