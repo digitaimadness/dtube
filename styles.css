@@ -48,6 +48,7 @@ body {
   background: var(--background-color);
   border-radius: 0;
   overflow: hidden;
+  z-index: 1;
 }
 
 /* Video element styling */
@@ -61,23 +62,40 @@ body {
 /* Spinner styling */
 .spinner {
   display: none;
-  position: absolute;
+  position: fixed;
   top: 50%;
   left: 50%;
+  transform: translate(-50%, -50%);
   width: 50px;
   height: 50px;
-  margin: -25px 0 0 -25px;
-  border: 4px solid var(--spinner-border);
-  border-top: 4px solid #fff;
-  border-radius: 50%;
   animation: spin 1s linear infinite;
+  z-index: 1000;
+
+  /* New popup-matching styles */
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  backdrop-filter: blur(4px);
+  
+  /* Adjust border colors to match spinner */
+  border-top-color: rgba(255, 255, 255, 0.8);
+  border-right-color: rgba(255, 255, 255, 0.5);
+  border-bottom-color: rgba(255, 255, 255, 0.3);
+  border-left-color: rgba(255, 255, 255, 0.5);
 }
 
 /* Spinner animation */
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Optional: Add size variation for different states */
+.spinner.large {
+  width: 70px;
+  height: 70px;
+  border-width: 3px;
 }
 
 /* Controls styling */
@@ -337,4 +355,26 @@ body {
     cursor: pointer;
     transition: opacity 0.3s ease;
     z-index: 100; /* Ensure proper layering */
+}
+
+/* Add these styles to your existing CSS */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+#spinner {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 60px;
+  border: 6px solid rgba(255, 192, 203, 0.3); /* Light pink border */
+  border-radius: 50%;
+  border-top-color: #ff69b4; /* Hot pink accent */
+  animation: spin 1s linear infinite;
+  z-index: 1000;
+  pointer-events: none;
 }
