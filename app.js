@@ -1155,17 +1155,10 @@ function initHueEffects() {
 
   document.addEventListener('click', () => {
     updateHue();
-    // Only start animation if not already running
-    if (!isAnimating) {
-      isAnimating = true;
-      animateHue();
-    }
   });
 
   document.addEventListener('scroll', () => {
     updateHue();
-    // Stop continuous animation on scroll
-    isAnimating = false;
   });
 }
 
