@@ -157,41 +157,46 @@ body {
   transition: none; /* Parent container handles transitions */
 }
 
-/* Update timestamp popup styles to match gesture popup */
+/* Timestamp Popup Styles */
 .timestamp-popup {
-  position: absolute;
-  bottom: 10px;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 1.1em;
-  font-weight: bold;
-  transform: translateX(-50%);
-  transform-origin: center bottom;
-  opacity: 0;
-  display: block !important;
-  pointer-events: auto !important;
-  cursor: grab;
-  transition: left 0.05s linear !important;
-  will-change: left, transform;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  border: 2px solid transparent;
-  background: rgba(0, 0, 0, 0.3);
-  color: #ffffff;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
-  touch-action: none; /* Prevent touch scrolling */
-  user-select: none; /* Prevent text selection */
+    /* Positioning */
+    bottom: 20px;
+    transform: translateX(-50%);
+    transform-origin: center bottom;
+    
+    /* Visual styling */
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 1.1em;
+    font-weight: bold;
+    background: rgba(0, 0, 0, 0.3);
+    color: #ffffff;
+    border: 2px solid transparent;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    
+    /* Interaction */
+    pointer-events: auto !important;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    
+    /* Transitions */
+    transition: 
+        left 0.05s linear,
+        opacity 0.3s ease;
+        
+    /* Effects */
+    backdrop-filter: blur(4px);
 }
 
-/* Update hover state */
+.timestamp-popup:active {
+    cursor: grabbing;
+}
+
 .progress-container:hover .timestamp-popup {
-  transform: translateX(-50%) scale(1.1);
-  opacity: 1;
-}
-
-/* Remove the border from original styles */
-.timestamp-popup::after {
-  content: none;
+    transform: translateX(-50%) scale(1.1);
+    opacity: 1;
 }
 
 /* Interaction zones covering the whole video screen */
@@ -332,8 +337,4 @@ body {
     cursor: pointer;
     transition: opacity 0.3s ease;
     z-index: 100; /* Ensure proper layering */
-}
-
-.timestamp-popup:active {
-    cursor: grabbing;
 }

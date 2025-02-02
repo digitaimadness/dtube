@@ -37,6 +37,10 @@ const videoSources = shuffleArray(videoSourcesImport);
 // Add global declaration at the top with other globals
 let controlsSystem;  // Add this line with other global variables
 
+// Add constants at the top with other globals
+const TIMESTAMP_OFFSET_BOTTOM = 20; // px from progress bar
+const POPUP_TRANSITION_DURATION = 0.05; // seconds
+
 // --- Helper Functions --- //
 
 /**
@@ -376,20 +380,18 @@ class UIController {
   createTimestampPopup() {
     this.timestampPopup = document.createElement('div');
     this.timestampPopup.className = 'timestamp-popup';
-    this.timestampPopup.style.cssText = `
-        position: absolute;
-        bottom: 50px;
-        transform: translateX(-50%);
-        padding: 4px 8px;
-        border-radius: 12px;
-        font-size: 0.9em;
-        font-weight: bold;
-        backdrop-filter: blur(4px);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        transition: opacity 0.2s ease;
-        display: none;
-        cursor: grab;
-    `;
+    
+    // Centralized style configuration
+    Object.assign(this.timestampPopup.style, {
+      cursor: 'grab',
+      display: 'none',
+      position: 'absolute',
+      bottom: `${TIMESTAMP_OFFSET_BOTTOM}px`,
+      transform: 'translateX(-50%)',
+      transformOrigin: 'center bottom',
+      transition: `left ${POPUP_TRANSITION_DURATION}s linear`
+    });
+
     this.controls.progressContainer.appendChild(this.timestampPopup);
   }
 
@@ -809,6 +811,24 @@ class UIController {
 
   hideTimestampPopup() {
     this.timestampPopup.style.opacity = '0';
+  }
+
+  // Consolidated popup position handling
+  updatePopupPosition(clientX) {
+    const position = this.calculateSeekPosition(clientX);
+    this.video.currentTime = position.time;
+    this.updatePlaybackProgress();
+    this.updateTimestampPopupPreview(position.offsetX);
+  }
+
+  // Simplified event handler
+  handlePointerMove(e) {
+    const position = this.calculateSeekPosition(e.clientX);
+    this.updateTimestampPopupPreview(position.offsetX);
+    
+    if (this.state.isDragging) {
+      this.updatePopupPosition(e.clientX);
+    }
   }
 }
 
