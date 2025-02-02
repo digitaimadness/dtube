@@ -1,8 +1,16 @@
 // Refactored and cleaned app.js
 
 // --- Global Constants and Variables --- //
-const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
+const PROVIDERS = (() => {
+  const others = ['io', 'algonode.xyz', 'eth.aragon.network', 'flk-ipfs.xyz'];
+  return ['dweb.link', ...shuffleArray(others)];
+})();
 const VIDEO_CACHE_KEY = 'videoCache';
+const CONTROLS_TIMEOUT = 3000;
+const TIMESTAMP_OFFSET_BOTTOM = 20;
+const POPUP_TRANSITION_DURATION = 0.05;
+const LOAD_TIMEOUT = 2000;
+const MAX_PROVIDER_RETRIES = 2; // 3 total attempts (initial + 2 retries)
 
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
@@ -29,7 +37,6 @@ const spinner = document.getElementById("spinner");
 const progressFilledElem = document.querySelector('.progress-bar');
 
 // Add these constants with other global constants
-const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
 
 // Import video sources
 import videoSourcesImport from './videoSources.js';
@@ -40,13 +47,8 @@ const videoSources = shuffleArray(videoSourcesImport);
 // Add global declaration at the top with other globals
 let controlsSystem;  // Add this line with other global variables
 
-// Add constants at the top with other globals
-const TIMESTAMP_OFFSET_BOTTOM = 20; // px from progress bar
-const POPUP_TRANSITION_DURATION = 0.05; // seconds
-
 // Existing variables
 let currentProviderIndex = 0;
-const LOAD_TIMEOUT = 2000; // 2 seconds
 
 // --- Helper Functions --- //
 
@@ -72,68 +74,55 @@ const getProviderUrl = (provider, cid) =>
 /**
  * Loads video sources from different providers until one works.
  */
-async function loadVideoFromCid(cid) {
-  // Check cache first
-  const cachedUrl = localStorage.getItem(getCacheKey(cid));
-  if (cachedUrl) {
-    return cachedUrl;
+async function loadVideoFromCid(cid, bypassCache = false) {
+  // Check cache first unless bypassing
+  if (!bypassCache) {
+    const cachedUrl = localStorage.getItem(getCacheKey(cid));
+    if (cachedUrl) {
+      return cachedUrl;
+    }
   }
-
+  
+  // Create a single hidden test video element for provider testing
+  const testVideo = document.createElement("video");
+  testVideo.style.display = "none";
+  document.body.appendChild(testVideo);
+  
   // Try providers one by one sequentially
   for (const provider of PROVIDERS) {
     const url = getProviderUrl(provider, cid);
     try {
-      const loadedUrl = await new Promise((resolve, reject) => {
-        const testVideo = document.createElement("video");
-        testVideo.style.display = "none";
-
-        // Cleanup helper: clear timeout and remove video element from DOM
-        const cleanup = () => {
-          clearTimeout(timeout);
-          testVideo.remove();
+      await new Promise((resolve, reject) => {
+        const onCanPlay = () => {
+          resolve(url);
         };
-
-        // Apply a timeout for this provider attempt
+        const onError = () => {
+          reject(new Error(`Provider ${provider} failed for CID ${cid}`));
+        };
+        testVideo.addEventListener("canplay", onCanPlay, { once: true });
+        testVideo.addEventListener("error", onError, { once: true });
         const timeout = setTimeout(() => {
-          cleanup();
           reject(new Error(`Provider ${provider} timed out for CID ${cid}`));
         }, LOAD_TIMEOUT);
-
-        // Success event listener
-        testVideo.addEventListener(
-          "canplay",
-          () => {
-            cleanup();
-            resolve(url);
-          },
-          { once: true }
-        );
-
-        // Error event listener
-        testVideo.addEventListener(
-          "error",
-          () => {
-            cleanup();
-            reject(new Error(`Provider ${provider} failed for CID ${cid}`));
-          },
-          { once: true }
-        );
-
+        // Ensure timeout is cleared after one of the events fires
+        Promise.race([
+          new Promise((res) => testVideo.addEventListener("canplay", res, { once: true })),
+          new Promise((res) => testVideo.addEventListener("error", res, { once: true }))
+        ]).finally(() => clearTimeout(timeout));
+        
         testVideo.src = url;
         testVideo.preload = "auto";
         testVideo.load();
-        document.body.appendChild(testVideo);
       });
-
-      // Cache and return the successful URL
-      localStorage.setItem(getCacheKey(cid), loadedUrl);
-      return loadedUrl;
+      localStorage.setItem(getCacheKey(cid), url);
+      document.body.removeChild(testVideo);
+      return url;
     } catch (error) {
       console.warn(error.message);
-      // continue to the next provider in case of failure
+      // Continue to next provider
     }
   }
-
+  document.body.removeChild(testVideo);
   throw new Error(`All providers failed for CID ${cid}`);
 }
 
@@ -351,8 +340,8 @@ class FrameAnalyzer {
 
   getDominantHue(video) {
     try {
-      this.ctx.drawImage(video, 0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
-      const imageData = this.ctx.getImageData(0, 0, 
+      offscreenCtx.drawImage(video, 0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
+      const imageData = offscreenCtx.getImageData(0, 0, 
         FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
       return this.calculateAverageHue(imageData.data);
     } catch (error) {
@@ -388,7 +377,7 @@ class UIController {
       bufferBar: document.querySelector('.buffer-bar'),
       gesturePopup: document.getElementById('gesturePopup'),
       leftZone: document.querySelector('.zone.left-zone'),
-      centerZone: document.querySelector('.zone.center-zone'),
+      centerZone: document.querySelector('.center-zone'),
       rightZone: document.querySelector('.zone.right-zone'),
       spinner: document.getElementById('spinner')
     };
@@ -402,7 +391,8 @@ class UIController {
       multiTapState: {},
       arrowTimeout: null,
       bufferingTimeout: null,
-      isBuffering: false
+      isBuffering: false,
+      providerRetries: 0, // Add provider retry counter
     };
 
     this.frameAnalyzer = new FrameAnalyzer();
@@ -605,16 +595,18 @@ class UIController {
   showControls() {
     if (this.controlsVisible && !this.fullscreenUIHidden) return;
     this.controlsVisible = true;
+    // Add progress background opacity
+    this.progressBackground.style.opacity = '1';
     this.controls.progressContainer.style.opacity = '1';
-    this.timestampPopup.style.opacity = '1';
   }
 
   hideControls() {
-    if (!this.controlsVisible || !document.fullscreenElement) return;
+    if (!this.controlsVisible) return;
     this.controlsVisible = false;
-    this.fullscreenUIHidden = true;
+    this.fullscreenUIHidden = false;
+    // Fade out progress background too
+    this.progressBackground.style.opacity = '0';
     this.controls.progressContainer.style.opacity = '0';
-    this.timestampPopup.style.opacity = '0';
   }
 
   initKeyBindings() {
@@ -914,17 +906,31 @@ class UIController {
     // Clear any existing buffering timeout
     if (this.state.bufferingTimeout) clearTimeout(this.state.bufferingTimeout);
     
-    // Set a timeout and verify buffering state before proceeding
-    this.state.bufferingTimeout = setTimeout(() => {
-      // Only trigger if buffering persists after 2 seconds
+    this.state.bufferingTimeout = setTimeout(async () => {
       if (this.state.isBuffering) {
-        // Increment currentVideoIndex to skip the problematic video
-        currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
-        // End the buffering state before loading next video
-        this.state.isBuffering = false;
-        this.updateSpinner();
-        // Call loadNextVideo to load the next video in the list
-        loadNextVideo();
+        try {
+          if (this.state.providerRetries < MAX_PROVIDER_RETRIES) {
+            this.state.providerRetries++;
+            // Clear cache for current CID
+            const currentCID = videoSources[currentVideoIndex];
+            localStorage.removeItem(getCacheKey(currentCID));
+            // Retry current video with different providers
+            await retryCurrentVideo();
+          } else {
+            // Exceeded retries - move to next video
+            currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+            this.state.providerRetries = 0;
+            await loadNextVideo();
+          }
+        } catch (error) {
+          console.error('Buffering recovery failed:', error);
+          currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+          this.state.providerRetries = 0;
+          await loadNextVideo();
+        } finally {
+          this.state.isBuffering = false;
+          this.updateSpinner();
+        }
       }
     }, 2000);
   }
@@ -1072,14 +1078,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // popup.show('Welcome to DaokoTube!');
 });
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    video.pause();
-  } else if (!video.paused) {
-    video.play();
-  }
-});
-
 function throttle(func, limit) {
   let lastCall = 0;
   let timeoutId;
@@ -1108,24 +1106,30 @@ async function preloadNextVideo() {
   isPreloadingNext = true;
   const nextIndex = (currentVideoIndex + 1) % videoSources.length;
   const cid = videoSources[nextIndex];
-  
-  try {
-    // Check cache first
-    const cachedUrl = localStorage.getItem(getCacheKey(cid));
-    if (cachedUrl) {
-      preloadedNextUrl = cachedUrl;
-      console.log('Using cached URL for preload:', cachedUrl);
-      return;
+
+  const preloadFunc = async () => {
+    try {
+      const cachedUrl = localStorage.getItem(getCacheKey(cid));
+      if (cachedUrl) {
+        preloadedNextUrl = cachedUrl;
+        console.log('Using cached URL for preload:', cachedUrl);
+        return;
+      }
+      const url = await loadVideoFromCid(cid);
+      preloadedNextUrl = url;
+      console.log('Preloaded next video URL:', url);
+    } catch (error) {
+      console.error('Preloading next video failed:', error);
+      preloadedNextUrl = null;
+    } finally {
+      isPreloadingNext = false;
     }
-    
-    const url = await loadVideoFromCid(cid);
-    preloadedNextUrl = url;
-    console.log('Preloaded next video URL:', url);
-  } catch (error) {
-    console.error('Preloading next video failed:', error);
-    preloadedNextUrl = null;
-  } finally {
-    isPreloadingNext = false;
+  };
+
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => preloadFunc());
+  } else {
+    setTimeout(() => preloadFunc(), 0);
   }
 }
 
@@ -1213,4 +1217,47 @@ function playAudio() {
   }).catch(error => {
     console.error('Playback failed:', error);
   });
+}
+
+// Add new retry function
+async function retryCurrentVideo() {
+  if (isLoading || !videoSources.length) return;
+  try {
+    isLoading = true;
+    controlsSystem.updateSpinner();
+    video.pause();
+    
+    // Clear existing source
+    video.src = "";
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    const cid = videoSources[currentVideoIndex];
+    console.log('Retrying video with CID:', cid);
+    const url = await loadVideoFromCid(cid, true); // Bypass cache
+    
+    video.src = url;
+    console.log('Retried video URL:', url);
+    
+    // Wait for enough data to play
+    await new Promise((resolve) => {
+      video.addEventListener('canplaythrough', resolve, { once: true });
+    });
+
+    try {
+      video.muted = true;
+      await video.play();
+      video.muted = false;
+    } catch (error) {
+      console.error('Autoplay blocked on retry', error);
+      controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 });
+    }
+  } catch (error) {
+    console.error('Error retrying video:', error);
+    // If retry fails, proceed to next video
+    currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+    loadNextVideo();
+  } finally {
+    isLoading = false;
+    controlsSystem.updateSpinner();
+  }
 }
