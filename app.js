@@ -2,6 +2,7 @@
 
 // --- Global Constants and Variables --- //
 const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
+const VIDEO_CACHE_KEY = 'videoCache';
 
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
@@ -71,6 +72,12 @@ const getProviderUrl = (provider, cid) =>
  * Loads video sources from different providers until one works.
  */
 function loadVideoFromCid(cid) {
+  // Check cache first
+  const cachedUrl = localStorage.getItem(getCacheKey(cid));
+  if (cachedUrl) {
+    return Promise.resolve(cachedUrl);
+  }
+
   const promises = PROVIDERS.map(provider => {
     return new Promise((resolve, reject) => {
       const url = getProviderUrl(provider, cid);
@@ -83,6 +90,8 @@ function loadVideoFromCid(cid) {
         "canplay",
         () => {
           cleanup();
+          // Cache successful URL
+          localStorage.setItem(getCacheKey(cid), url);
           resolve(url);
         },
         { once: true }
@@ -116,6 +125,7 @@ async function loadNextVideo() {
   if (isLoading || !videoSources.length) return;
   try {
     isLoading = true;
+    controlsSystem.updateSpinner();
     video.pause();
     
     // Clear existing source and force garbage collection
@@ -168,6 +178,7 @@ async function loadNextVideo() {
     loadNextVideo();
   } finally {
     isLoading = false;
+    controlsSystem.updateSpinner();
   }
 }
 
@@ -178,6 +189,7 @@ async function loadPreviousVideo() {
   if (isLoading || !videoSources.length) return;
   try {
     isLoading = true;
+    controlsSystem.updateSpinner();
     video.pause();
     // Decrement index with wrap-around
     currentVideoIndex = (currentVideoIndex - 1 + videoSources.length) % videoSources.length;
@@ -198,6 +210,7 @@ async function loadPreviousVideo() {
     console.error("Error loading previous video:", error);
   } finally {
     isLoading = false;
+    controlsSystem.updateSpinner();
   }
 }
 
@@ -448,9 +461,9 @@ class UIController {
       this.handlePopupDragMove(e);
     });
     
-    document.addEventListener('pointerup', (e) => {
+    document.addEventListener('pointerup', (e => {
       this.handlePopupDragEnd(e);
-    });
+    }));
   }
 
   updateBufferBar(video) {
@@ -1017,7 +1030,16 @@ async function preloadNextVideo() {
   isPreloadingNext = true;
   const nextIndex = (currentVideoIndex + 1) % videoSources.length;
   const cid = videoSources[nextIndex];
+  
   try {
+    // Check cache first
+    const cachedUrl = localStorage.getItem(getCacheKey(cid));
+    if (cachedUrl) {
+      preloadedNextUrl = cachedUrl;
+      console.log('Using cached URL for preload:', cachedUrl);
+      return;
+    }
+    
     const url = await loadVideoFromCid(cid);
     preloadedNextUrl = url;
     console.log('Preloaded next video URL:', url);
@@ -1027,4 +1049,8 @@ async function preloadNextVideo() {
   } finally {
     isPreloadingNext = false;
   }
+}
+
+function getCacheKey(cid) {
+  return `video_${cid}`;
 }
