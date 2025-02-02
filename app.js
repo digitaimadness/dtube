@@ -1,4 +1,3 @@
-// Refactored and cleaned app.js
 
 // --- Global Constants and Variables --- //
 const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
