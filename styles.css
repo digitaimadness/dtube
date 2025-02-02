@@ -7,6 +7,9 @@
   --border-color: rgba(255, 255, 255, 0.1);
   --progress-track: rgba(50, 50, 50, 0.5);
   --spinner-border: rgba(255, 255, 255, 0.3);
+  --main-hue: 0; /* Centralized hue variable */
+  --primary-color: hsl(var(--main-hue), 100%, 50%);
+  --secondary-color: hsl(var(--main-hue), 80%, 60%);
 }
 
 /* Reset margins and paddings */
@@ -158,7 +161,9 @@ body {
   height: 100%;
   background-color: #4caf50;
   z-index: 2;
-  transition: width 0.2s linear;
+  transition: 
+    width 0.2s linear,
+    background-color 0.5s ease;
   pointer-events: none;
 }
 
@@ -377,4 +382,66 @@ body {
   animation: spin 1s linear infinite;
   z-index: 1000;
   pointer-events: none;
+}
+
+/* Hide all native video controls */
+video::-webkit-media-controls {
+  display: none !important;
+}
+
+video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+
+video::-webkit-media-controls-panel {
+  display: none !important;
+}
+
+video::-webkit-media-controls-play-button {
+  display: none !important;
+}
+
+video::-webkit-media-controls-timeline {
+  display: none !important;
+}
+
+video::-webkit-media-controls-current-time-display {
+  display: none !important;
+}
+
+video::-webkit-media-controls-time-remaining-display {
+  display: none !important;
+}
+
+video::-webkit-media-controls-mute-button {
+  display: none !important;
+}
+
+video::-webkit-media-controls-volume-slider {
+  display: none !important;
+}
+
+video::-webkit-media-controls-fullscreen-button {
+  display: none !important;
+}
+
+/* Consolidated hue animations */
+@keyframes hue-shift {
+    0% { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+}
+
+.element, .other-element {
+    animation: hue-shift 10s infinite linear;
+    transition: background-color 0.3s;
+}
+
+/* Add this rule to ensure smooth transitions */
+#progress-bar {
+    transition: all 0.1s linear;
+}
+
+/* Add this for instant updates during drag */
+#progress-bar:active {
+    transition: none;
 }

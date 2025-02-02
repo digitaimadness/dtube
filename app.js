@@ -7,6 +7,7 @@ const VIDEO_CACHE_KEY = 'videoCache';
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
 video.crossOrigin = "anonymous";
+video.controls = false; // Disable native controls
 
 // Offscreen canvas for optimized frame sampling
 const offscreenCanvas = document.createElement("canvas");
@@ -121,7 +122,7 @@ function loadVideoFromCid(cid) {
 /**
  * Loads the next video using provider retry logic.
  */
-async function loadNextVideo() {
+async function loadNextVideo(retries = 0) {
   if (isLoading || !videoSources.length) return;
   try {
     isLoading = true;
@@ -174,8 +175,14 @@ async function loadNextVideo() {
     }
   } catch (error) {
     console.error('Error loading video:', error);
-    // Skip to next video on error
-    loadNextVideo();
+    // Skip to next video on error with retry limit
+    if (retries < videoSources.length) {
+      console.log(`Retrying (${retries + 1}/${videoSources.length})...`);
+      setTimeout(() => loadNextVideo(retries + 1), 0);
+    } else {
+      console.error('All videos failed to load after maximum retries.');
+      controlsSystem.showGesturePopup("All videos failed", { x: window.innerWidth/2, y: window.innerHeight/2 });
+    }
   } finally {
     isLoading = false;
     controlsSystem.updateSpinner();
@@ -461,9 +468,9 @@ class UIController {
       this.handlePopupDragMove(e);
     });
     
-    document.addEventListener('pointerup', (e => {
+    document.addEventListener('pointerup', (e) => {
       this.handlePopupDragEnd(e);
-    }));
+    });
   }
 
   updateBufferBar(video) {
@@ -781,17 +788,20 @@ class UIController {
   updateAll() {
     this.updateBufferBar(this.video);
     
-    // Always update playback progress regardless of controls visibility
-    this.updatePlaybackProgress(this.video);
-    
-    if (this.video.duration > 0) {
+    // Only update progress if not dragging
+    if (!this.state.isDragging) {
+      this.updatePlaybackProgress(this.video);
+    }
+
+    if (this.video.duration > 0 && !this.state.isDragging) {
       const rect = this.controls.progressContainer.getBoundingClientRect();
       const percent = this.video.currentTime / this.video.duration;
       const offsetX = percent * rect.width;
       this.updateTimestampPopupPreview(offsetX);
     }
 
-    if (Date.now() - this.lastHueUpdate >= 500) {
+    // Update hue more frequently (changed from 500ms to 100ms)
+    if (Date.now() - this.lastHueUpdate >= 100) {
       if (!this.video.paused && this.video.readyState >= 2) {
         const hue = this.frameAnalyzer.getDominantHue(this.video);
         this.updateProgressBarColor(hue);
@@ -816,6 +826,7 @@ class UIController {
     if (this.state.isDraggingPopup) {
       const position = this.calculateSeekPosition(e.clientX);
       this.video.currentTime = position.time;
+      // Update both progress bar and timestamp together
       this.controls.progressBar.style.width = `${(position.time / this.video.duration) * 100}%`;
       this.updateTimestampPopupPreview(position.offsetX);
     }
@@ -841,21 +852,22 @@ class UIController {
     this.updateTimestampPopupPreview(position.offsetX);
   }
 
-  // Simplified event handler
+  // Simplified event handler - add spinner update
   handlePointerMove(e) {
     const position = this.calculateSeekPosition(e.clientX);
+    // Update both elements simultaneously
     this.updateTimestampPopupPreview(position.offsetX);
-    
     if (this.state.isDragging) {
       this.updatePopupPosition(e.clientX);
     }
+    this.updateSpinner();
   }
 
   updateSpinner() {
     const showSpinner = isLoading || isBuffering;
     this.controls.spinner.style.display = showSpinner ? "block" : "none";
     
-    // Update spinner color to match progress bar
+    // Only calculate hue when spinner is visible
     if (showSpinner) {
       const currentHue = this.frameAnalyzer.getDominantHue(this.video);
       this.controls.spinner.style.borderTopColor = `hsl(${currentHue}, 70%, 50%)`;
@@ -879,11 +891,24 @@ function registerVideoEventListeners() {
     if (!isBuffering) {
       isBuffering = true;
     }
+    // Clear any existing timeout
+    if (this.bufferingTimeout) clearTimeout(this.bufferingTimeout);
+    
+    // Set new timeout for 2000ms (2 seconds)
+    this.bufferingTimeout = setTimeout(() => {
+        switchVideoProvider(); // Existing provider switching function
+        showLoadingIndicator(false); // Hide loading after switch
+    }, 2000); // Changed from previous value (likely 3000) to 2000
   });
 
   video.addEventListener("playing", () => {
     if (isBuffering) {
       isBuffering = false;
+    }
+    // Clear timeout when playback resumes
+    if (this.bufferingTimeout) {
+        clearTimeout(this.bufferingTimeout);
+        showLoadingIndicator(false);
     }
   });
 
@@ -1054,3 +1079,68 @@ async function preloadNextVideo() {
 function getCacheKey(cid) {
   return `video_${cid}`;
 }
+
+function initHueEffects() {
+    // Merged hue rotation logic into single handler
+    let hue = 0;
+    
+    function updateHue() {
+        hue = (hue + 1) % 360;
+        document.documentElement.style.setProperty('--main-hue', hue);
+    }
+
+    // Combined animation and interaction handlers
+    const animateHue = () => {
+        updateHue();
+        requestAnimationFrame(animateHue);
+    };
+    
+    document.addEventListener('click', () => {
+        updateHue();
+        animateHue();
+    });
+
+    document.addEventListener('scroll', () => {
+        updateHue();
+    });
+}
+
+// Initialize all hue-related effects
+initHueEffects();
+// Removed duplicate hue-related functions
+
+function updateDisplay() {
+    const progress = (video.currentTime / video.duration) * 100;
+    controlsSystem.controls.progressBar.style.width = progress + '%';
+    controlsSystem.timestampPopup.textContent = formatTime(video.currentTime);
+    requestAnimationFrame(updateDisplay); // Add this for continuous updates
+}
+
+function playAudio() {
+    video.play();
+    requestAnimationFrame(updateDisplay); // Start the update loop
+}
+
+// Add this event listener for real-time sync during drag
+controlsSystem.controls.progressContainer.addEventListener('input', () => {
+    const seekTime = (controlsSystem.controls.progressBar.value / 100) * video.duration;
+    video.currentTime = seekTime;
+    controlsSystem.timestampPopup.textContent = formatTime(seekTime);
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+  const video = document.getElementById('videoPlayer');
+  if (video) {
+    // Add video load timeout
+    let loadTimeout = setTimeout(() => {
+      if (video.readyState < 1) { // 0 = HAVE_NOTHING
+        playNextVideo();
+      }
+    }, 4000);
+
+    // Clear timeout if video loads
+    video.addEventListener('loadeddata', () => {
+      clearTimeout(loadTimeout);
+    });
+  }
+});
