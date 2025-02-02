@@ -42,6 +42,10 @@ let controlsSystem;  // Add this line with other global variables
 const TIMESTAMP_OFFSET_BOTTOM = 20; // px from progress bar
 const POPUP_TRANSITION_DURATION = 0.05; // seconds
 
+// Existing variables
+let currentProviderIndex = 0;
+const LOAD_TIMEOUT = 2000; // 2 seconds
+
 // --- Helper Functions --- //
 
 /**
@@ -112,7 +116,6 @@ async function loadNextVideo() {
   if (isLoading || !videoSources.length) return;
   try {
     isLoading = true;
-    updateSpinner();
     video.pause();
     
     // Clear existing source and force garbage collection
@@ -165,7 +168,6 @@ async function loadNextVideo() {
     loadNextVideo();
   } finally {
     isLoading = false;
-    updateSpinner();
   }
 }
 
@@ -176,7 +178,6 @@ async function loadPreviousVideo() {
   if (isLoading || !videoSources.length) return;
   try {
     isLoading = true;
-    updateSpinner();
     video.pause();
     // Decrement index with wrap-around
     currentVideoIndex = (currentVideoIndex - 1 + videoSources.length) % videoSources.length;
@@ -197,7 +198,6 @@ async function loadPreviousVideo() {
     console.error("Error loading previous video:", error);
   } finally {
     isLoading = false;
-    updateSpinner();
   }
 }
 
@@ -349,7 +349,8 @@ class UIController {
       gesturePopup: document.getElementById('gesturePopup'),
       leftZone: document.querySelector('.zone.left-zone'),
       centerZone: document.querySelector('.zone.center-zone'),
-      rightZone: document.querySelector('.zone.right-zone')
+      rightZone: document.querySelector('.zone.right-zone'),
+      spinner: document.getElementById('spinner')
     };
     
     this.state = {
@@ -483,7 +484,7 @@ class UIController {
     if (this.controls.progressBar) {
       this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
       // Update spinner color to match progress bar
-      document.getElementById('spinner').style.borderTopColor = 
+      this.controls.spinner.style.borderTopColor = 
         `hsl(${hue}, 70%, 50%)`;
       // Update timestamp popup styles to match
       this.timestampPopup.style.backgroundColor = `hsla(${hue}, 70%, 50%, 0.2)`;
@@ -784,6 +785,8 @@ class UIController {
       }
       this.lastHueUpdate = Date.now();
     }
+
+    this.updateSpinner();
   }
 
   handlePopupDragStart(e) {
@@ -834,6 +837,17 @@ class UIController {
       this.updatePopupPosition(e.clientX);
     }
   }
+
+  updateSpinner() {
+    const showSpinner = isLoading || isBuffering;
+    this.controls.spinner.style.display = showSpinner ? "block" : "none";
+    
+    // Update spinner color to match progress bar
+    if (showSpinner) {
+      const currentHue = this.frameAnalyzer.getDominantHue(this.video);
+      this.controls.spinner.style.borderTopColor = `hsl(${currentHue}, 70%, 50%)`;
+    }
+  }
 }
 
 // --- Update registerVideoEventListeners ---
@@ -851,14 +865,12 @@ function registerVideoEventListeners() {
   video.addEventListener("waiting", () => {
     if (!isBuffering) {
       isBuffering = true;
-      updateSpinner();
     }
   });
 
   video.addEventListener("playing", () => {
     if (isBuffering) {
       isBuffering = false;
-      updateSpinner();
     }
   });
 
@@ -1015,9 +1027,4 @@ async function preloadNextVideo() {
   } finally {
     isPreloadingNext = false;
   }
-}
-
-// Add this function with other helper functions
-function updateSpinner() {
-  spinner.style.display = (isLoading || isBuffering) ? "block" : "none";
 }
