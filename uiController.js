@@ -55,18 +55,28 @@ class UIController {
   }
 
   createTimestampPopup() {
-    const popup = document.createElement('div');
-    popup.className = 'timestamp-popup';
-    popup.style.cssText = `
-      cursor: grab;
-      display: none;
-      position: absolute;
-      bottom: 20px;
-      transform: translateX(-50%);
-      transition: left 0.05s linear, opacity 0.3s ease;
-    `;
-    this.ui.progressContainer.appendChild(popup);
-    this.timestampPopup = popup;
+    this.timestampPopup = document.createElement('div');
+    this.timestampPopup.className = 'timestamp-popup';
+    
+    // Unified styling with progress container
+    Object.assign(this.timestampPopup.style, {
+      position: 'absolute',
+      bottom: 'calc(100% + 12px)', // Maintain fixed distance from progress bar
+      transform: 'translateX(-50%)',
+      transformOrigin: 'center bottom',
+      pointerEvents: 'none',
+      opacity: '0',
+      transition: 'opacity 0.2s ease, transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)',
+      padding: '6px 12px',
+      borderRadius: '4px',
+      fontSize: '14px',
+      fontWeight: '500',
+      whiteSpace: 'nowrap',
+      zIndex: '1000'
+    });
+
+    // Add to progress container
+    this.controls.progressContainer.appendChild(this.timestampPopup);
   }
 
   createProgressBackground() {
@@ -241,16 +251,27 @@ class UIController {
     this.showControls();
     this.ui.progressContainer.setPointerCapture(e.pointerId);
     this.seekToPosition(e.clientX);
-    if (this.timestampPopup) {
-      this.timestampPopup.style.display = 'block';
-    }
+    this.timestampPopup.style.display = 'block';
+    this.timestampPopup.style.opacity = '1';
+    this.timestampPopup.style.transform = 'translateX(-50%) translateY(-8px)';
     this.ui.progressBar.classList.add('dragging');
   }
 
   handlePointerMove(e) {
-    if (this.isDragging) {
-      this.seekToPosition(e.clientX);
-    }
+    if (!this.state.isDragging) return;
+    
+    const rect = this.controls.progressContainer.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const percent = Math.min(Math.max(0, offsetX / rect.width), 1);
+    
+    // Update popup position
+    this.timestampPopup.style.left = `${percent * 100}%`;
+    this.timestampPopup.textContent = formatTime(percent * this.video.duration);
+    
+    // Maintain vertical distance
+    this.timestampPopup.style.transform = `translateX(-50%) translateY(${
+      this.state.isDragging ? '-8px' : '0'
+    })`;
   }
 
   handlePointerUp(e) {
@@ -259,9 +280,10 @@ class UIController {
       this.isDragging = false;
       this.ui.progressContainer.releasePointerCapture(e.pointerId);
       this.ui.progressBar.classList.remove('dragging');
-      if (this.timestampPopup) {
-        this.timestampPopup.style.display = 'none';
-      }
+      this.timestampPopup.style.opacity = '0';
+      this.timestampPopup.style.transform = 'translateX(-50%) translateY(0)';
+      // Let CSS transition handle the hide animation
+      setTimeout(() => this.timestampPopup.style.display = 'none', 300);
     }
   }
 
@@ -270,10 +292,13 @@ class UIController {
     const offsetX = clientX - rect.left;
     const percent = Math.min(Math.max(0, offsetX / rect.width), 1);
     const newTime = percent * this.video.duration;
+    
     this.video.currentTime = newTime;
+    
     if (this.timestampPopup) {
       this.timestampPopup.textContent = formatTime(newTime);
-      this.timestampPopup.style.left = offsetX + 'px';
+      // Position as percentage relative to progress container
+      this.timestampPopup.style.left = `${percent * 100}%`;
     }
   }
 
@@ -285,7 +310,7 @@ class UIController {
     popup.style.opacity = '1';
     setTimeout(() => {
       popup.style.opacity = '0';
-      setTimeout(() => { popup.style.display = 'none'; }, 300);
+      setTimeout(() => popup.style.display = 'none', 300);
     }, 1000);
   }
 
@@ -301,6 +326,108 @@ class UIController {
       notificationsEl.classList.remove('show');
       setTimeout(() => notificationsEl.remove(), 300);
     }, 3000);
+  }
+
+  updateTimestampPopupPreview(offsetX) {
+    const percent = offsetX / this.state.containerWidth;
+    const time = this.video.duration * percent;
+    
+    this.timestampPopup.querySelector('.time-display').textContent = formatTime(time);
+    this.miniProgress.style.width = `${percent * 100}%`;
+    this.timestampPopup.style.left = `${offsetX}px`;
+
+    // Animation system integration
+    if (!this.timestampPopup.classList.contains('visible')) {
+      this.timestampPopup.classList.remove('hidden');
+      this.timestampPopup.classList.add('visible');
+    }
+  }
+
+  hideTimestampPopup() {
+    this.timestampPopup.classList.add('hidden');
+    this.timestampPopup.classList.remove('visible', 'dragging');
+    
+    // Cleanup after animation
+    this.timestampPopup.addEventListener('animationend', () => {
+      this.timestampPopup.style.display = 'none';
+    }, { once: true });
+  }
+
+  handlePopupDragMove(e) {
+    if (this.state.isDraggingPopup) {
+      // ... existing code ...
+      this.timestampPopup.classList.add('dragging');
+    }
+  }
+
+  updateAllUIColor() {
+    const hue = this.currentHue;
+    const elements = {
+      progressBar: this.controls.progressBar,
+      spinner: this.controls.spinner,
+      timestampPopup: this.timestampPopup,
+      progressBackground: this.progressBackground,
+      playPauseAnimation: this.playPauseAnimation
+    };
+
+    // Common color properties
+    const primaryColor = `hsl(${hue}, 70%, 50%)`;
+    const secondaryColor = `hsla(${hue}, 70%, 35%, 0.8)`;
+    const bgColor = `hsla(${hue}, 30%, 20%, 0.3)`;
+    const textColor = `hsl(${hue}, 70%, 95%)`;
+
+    // Batch update elements
+    Object.entries(elements).forEach(([key, element]) => {
+      if (!element) return;
+      
+      switch(key) {
+        case 'progressBar':
+          element.style.backgroundColor = primaryColor;
+          break;
+        case 'spinner':
+          element.style.borderTopColor = primaryColor;
+          break;
+        case 'timestampPopup':
+          element.style.backgroundColor = `hsla(${hue}, 70%, 50%, 0.2)`;
+          element.style.border = `2px solid ${secondaryColor}`;
+          element.style.color = textColor;
+          break;
+        case 'progressBackground':
+          element.style.backgroundColor = bgColor;
+          break;
+        case 'playPauseAnimation':
+          element.style.color = primaryColor;
+          break;
+      }
+    });
+  }
+
+  showFastSeekAnimation(direction, position) {
+    const container = document.createElement('div');
+    container.className = `fastseek-indicator ${direction}`;
+    
+    // Use same SVG structure as play/pause
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', direction === 'right' ? 
+      'M8 5v14l11-7z' :  // Right arrow (play icon)
+      'M6 19h4V5H6v14zm8-14v14h4V5h-4z'); // Left arrow (pause-like icon)
+    
+    svg.appendChild(path);
+    container.appendChild(svg);
+    document.body.appendChild(container);
+
+    // Center positioning like play/pause
+    container.style.left = '50%';
+    container.style.top = '50%';
+    container.style.transform = 'translate(-50%, -50%)';
+
+    // Use same animation class
+    container.classList.add('visible');
+    setTimeout(() => {
+      container.remove();
+    }, 600);
   }
 }
 
