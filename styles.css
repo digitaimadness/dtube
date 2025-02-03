@@ -566,3 +566,127 @@ video::-webkit-media-controls-fullscreen-button {
 .ui-component .notification {
   /* notification styles */
 }
+
+/* Updated play/pause animation styles */
+.play-pause-animation {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.5);
+  width: 120px;
+  height: 120px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1000;
+  color: hsl(var(--main-hue), 80%, 65%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  padding: 20px;
+}
+
+.play-pause-animation.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.play-pause-animation svg {
+  width: 80px;
+  height: 80px;
+  fill: currentColor;
+  opacity: 0.9;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+
+.pause-icon {
+  display: none;
+}
+
+.play-pause-animation.pause .play-icon {
+  display: none;
+}
+
+.play-pause-animation.pause .pause-icon {
+  display: block;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.15);
+    opacity: 0;
+  }
+}
+
+.play-pause-animation::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  animation: pulse 0.6s ease-out forwards;
+  z-index: -1;
+}
+
+/* Add fastseek animation styles */
+.fastseek-indicator {
+  position: fixed;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.5);
+  animation: fastseekPulse 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 50%;
+  border: none;
+  color: hsl(var(--main-hue), 80%, 65%);
+  padding: 20px;
+}
+
+.fastseek-indicator svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+
+@keyframes fastseekPulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
+/* Add zone hover effects */
+.zone {
+  transition: background-color 0.3s ease;
+}
+
+.zone.left-zone:hover {
+  background: linear-gradient(90deg, rgba(255,255,255,0.1) 0%, transparent 100%);
+}
+
+.zone.right-zone:hover {
+  background: linear-gradient(270deg, rgba(255,255,255,0.1) 0%, transparent 100%);
+}

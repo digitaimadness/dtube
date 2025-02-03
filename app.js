@@ -300,7 +300,7 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.ui.secsSeek(-15);
-        this.ui.showGesturePopup("Rewind 15s", clickPos, 'info');
+        this.ui.showFastSeekAnimation('left', clickPos);
         break;
       case 3: 
         loadPreviousVideo();
@@ -316,7 +316,7 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.ui.secsSeek(15);
-        this.ui.showGesturePopup("Forward 15s", clickPos, 'info');
+        this.ui.showFastSeekAnimation('right', clickPos);
         break;
       case 3:
         loadNextVideo();
@@ -475,6 +475,8 @@ class UIController {
       isBuffering: false,
       timeoutId: null
     };
+
+    this.playPauseAnimation = document.getElementById('playPauseAnimation');
   }
 
   initializeUI() {
@@ -594,18 +596,46 @@ class UIController {
     }
   }
 
-  updateProgressBarColor(hue) {
-    if (this.controls.progressBar) {
-      this.controls.progressBar.style.backgroundColor = `hsl(${hue}, 70%, 50%)`;
-      // Update spinner color to match progress bar
-      this.controls.spinner.style.borderTopColor = 
-        `hsl(${hue}, 70%, 50%)`;
-      // Update timestamp popup styles to match
-      this.timestampPopup.style.backgroundColor = `hsla(${hue}, 70%, 50%, 0.2)`;
-      this.timestampPopup.style.border = `2px solid hsla(${hue}, 70%, 35%, 0.8)`;
-      this.timestampPopup.style.color = `hsl(${hue}, 70%, 95%)`;
-      this.progressBackground.style.backgroundColor = `hsla(${hue}, 30%, 20%, 0.3)`;
-    }
+  updateAllUIColor() {
+    const hue = this.currentHue;
+    const elements = {
+      progressBar: this.controls.progressBar,
+      spinner: this.controls.spinner,
+      timestampPopup: this.timestampPopup,
+      progressBackground: this.progressBackground,
+      playPauseAnimation: this.playPauseAnimation
+    };
+
+    // Common color properties
+    const primaryColor = `hsl(${hue}, 70%, 50%)`;
+    const secondaryColor = `hsla(${hue}, 70%, 35%, 0.8)`;
+    const bgColor = `hsla(${hue}, 30%, 20%, 0.3)`;
+    const textColor = `hsl(${hue}, 70%, 95%)`;
+
+    // Batch update elements
+    Object.entries(elements).forEach(([key, element]) => {
+      if (!element) return;
+      
+      switch(key) {
+        case 'progressBar':
+          element.style.backgroundColor = primaryColor;
+          break;
+        case 'spinner':
+          element.style.borderTopColor = primaryColor;
+          break;
+        case 'timestampPopup':
+          element.style.backgroundColor = `hsla(${hue}, 70%, 50%, 0.2)`;
+          element.style.border = `2px solid ${secondaryColor}`;
+          element.style.color = textColor;
+          break;
+        case 'progressBackground':
+          element.style.backgroundColor = bgColor;
+          break;
+        case 'playPauseAnimation':
+          element.style.color = primaryColor;
+          break;
+      }
+    });
   }
 
   updateTimestampPopupPreview(offsetX) {
@@ -907,21 +937,26 @@ class UIController {
 
   togglePlayPause(clickPos) {
     this.resetControlsTimeout();
-    if (!clickPos) {
-      clickPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    }
-    if (this.video.paused) {
-      // Unmute on first user interaction
+    const animation = document.getElementById('playPauseAnimation');
+    const isPaused = this.video.paused;
+
+    // Always center the animation
+    animation.classList.remove('play', 'pause');
+    animation.classList.add(isPaused ? 'play' : 'pause');
+    
+    // Trigger animation
+    animation.classList.add('visible');
+    setTimeout(() => {
+      animation.classList.remove('visible');
+    }, 300);
+
+    if (isPaused) {
       this.video.muted = false;
-      this.video.play().then(() => {
-        this.showGesturePopup("Play", clickPos, 'info');
-      }).catch(err => {
+      this.video.play().catch(err => {
         console.error("Error playing video:", err);
-        this.showGesturePopup("Play", clickPos, 'error');
       });
     } else {
       this.video.pause();
-      this.showGesturePopup("Pause", clickPos, 'info');
     }
   }
 
@@ -952,12 +987,10 @@ class UIController {
     // Keep existing hue update throttling (200ms)
     if (Date.now() - this.lastHueUpdate >= 200) {
       if (!this.video.paused && this.video.readyState >= 2) {
-        const hueResult = this.frameAnalyzer.getDominantHue(this.video);
-        if (hueResult && typeof hueResult.then === 'function') {
-          hueResult.then((hue) => this.updateProgressBarColor(hue));
-        } else {
-          this.updateProgressBarColor(hueResult);
-        }
+        this.frameAnalyzer.getDominantHue(this.video).then((hue) => {
+          this.currentHue = hue;
+          this.updateAllUIColor();
+        });
       }
       this.lastHueUpdate = Date.now();
     }
@@ -1078,7 +1111,7 @@ class UIController {
   updateColorScheme() {
     this.frameAnalyzer.getDominantHue(this.video).then(hue => {
       this.currentHue = hue;
-      this.updateProgressBarColor(hue);
+      this.updateAllUIColor();
     });
   }
 
@@ -1086,6 +1119,32 @@ class UIController {
   initZoneInteractions() {
     this.zoneHandler = new ZoneInteractionHandler(this);
     this.zoneHandler.initialize();
+  }
+
+  showFastSeekAnimation(direction, position) {
+    const container = document.createElement('div');
+    container.className = `fastseek-indicator ${direction}`;
+    
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', direction === 'right' ? 
+      'M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z' : 
+      'M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z');
+    
+    svg.appendChild(path);
+    container.appendChild(svg);
+    document.body.appendChild(container);
+
+    // Position near tap location
+    container.style.left = `${position.x - 60}px`;
+    container.style.top = `${position.y - 60}px`;
+
+    // Animation
+    container.classList.add('active');
+    setTimeout(() => {
+      container.remove();
+    }, 500);
   }
 }
 
