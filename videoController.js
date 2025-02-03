@@ -7,7 +7,16 @@ class VideoController {
   constructor(videoElement, providers) {
     this.video = videoElement;
     this.providers = providers;
+    // Track provider performance metrics
+    this.providerStats = new Map(providers.map(p => [p, {
+      successCount: 0,
+      errorCount: 0,
+      avgSpeed: 0,
+      lastUsed: 0
+    }]));
     // Chunk streaming properties
+    this.chunkSize = 4 * 1024 * 1024; // 4MB
+    this.concurrentFetches = providers.length; // Use all providers concurrently
     this.currentProviderIndex = 0;
     this.chunkQueue = [];
     this.activeFetches = new Map();
@@ -20,49 +29,98 @@ class VideoController {
     this.currentVideoIndex = 0;
     this.preloadedVideoUrl = null;
     this.isLoading = false;
+    this.debug = true; // Set to false to disable logging
+    this.chunkColors = new Map();
   }
 
   // Chunk streaming methods
   async fetchChunk(cid, chunkIndex) {
-    const chunkSize = 4 * 1024 * 1024; // 4MB
-    const start = chunkIndex * chunkSize;
-    const providerIndex = chunkIndex % this.providers.length;
-    const provider = this.providers[providerIndex];
+    const start = chunkIndex * this.chunkSize;
+    const end = start + this.chunkSize - 1;
     
-    try {
-      const chunk = await provider.fetch(cid, start, start + chunkSize - 1);
-      return { chunkIndex, data: chunk };
-    } catch (error) {
-      console.error(`Failed to fetch chunk ${chunkIndex} from ${provider.name}:`, error);
-      return { chunkIndex, data: null };
+    if (this.debug) console.log(`%c[Fetch] Chunk ${chunkIndex} (${start}-${end})`, 'color: #3F51B5');
+
+    // Get providers sorted by performance (best first)
+    const sortedProviders = this.getSortedProviders();
+    
+    for (const provider of sortedProviders) {
+      const stats = this.providerStats.get(provider);
+      try {
+        if (this.debug) console.log(`%cTrying ${provider.name}...`, 'color: #607D8B');
+        const startTime = performance.now();
+        const chunk = await provider.fetch(cid, start, end);
+        const fetchTime = performance.now() - startTime;
+        
+        if (this.debug) console.log(`%cSuccess on ${provider.name} (${(fetchTime).toFixed(1)}ms)`, 'color: #8BC34A');
+        stats.successCount++;
+        stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + (this.chunkSize / (fetchTime / 1000))) / stats.successCount;
+        stats.lastUsed = Date.now();
+        
+        return { chunkIndex, data: chunk, provider: provider.name };
+      } catch (error) {
+        if (this.debug) console.log(`%cFailed on ${provider.name}: ${error.message}`, 'color: #F44336');
+        stats.errorCount++;
+        console.warn(`Chunk ${chunkIndex} failed on ${provider.name}, trying next provider`);
+      }
     }
+    console.groupEnd();
+    throw new Error(`All providers failed for chunk ${chunkIndex}`);
+  }
+
+  getSortedProviders() {
+    return [...this.providers].sort((a, b) => {
+      const statsA = this.providerStats.get(a);
+      const statsB = this.providerStats.get(b);
+      
+      // Prioritize providers with higher success rate and speed
+      const scoreA = (statsA.avgSpeed * 0.7) + (statsA.successCount * 0.3);
+      const scoreB = (statsB.avgSpeed * 0.7) + (statsB.successCount * 0.3);
+      
+      return scoreB - scoreA;
+    });
   }
 
   async startStream(cid) {
+    if (this.debug) console.log(`%c[Stream Start] CID: ${cid} ChunkSize: ${this.chunkSize}`, 'color: #4CAF50');
     let expectedChunk = 0;
     const decoder = new StreamDecoder();
-    const chunkQueue = this.chunkQueue;
 
-    // Start initial concurrent fetches
-    for (let i = 0; i < this.providers.length; i++) {
+    // Debug initialization
+    if (this.debug) {
+      console.groupCollapsed(`%cInitial Chunk Fetches (${this.concurrentFetches})`, 'color: #2196F3');
+      for (let i = 0; i < this.concurrentFetches; i++) {
+        console.log(`%cChunk ${i} queued`, 'color: #FF9800');
+      }
+      console.groupEnd();
+    }
+
+    // Initialize with concurrent fetches for first chunks
+    for (let i = 0; i < this.concurrentFetches; i++) {
       this.queueChunkFetch(cid, i);
     }
 
     while (true) {
+      if (this.debug) console.log(`%c[Loop] Expected: ${expectedChunk} | Queue: ${this.chunkQueue.map(c => c.chunkIndex)} | Active: ${[...this.activeFetches.keys()]}`, 'color: #9C27B0');
+
       const result = await Promise.race([
         this.waitForNextChunk(),
         this.video.needsData?.() || Promise.resolve('chunk-ready')
       ]);
 
       if (result === 'need-data') {
-        while (chunkQueue.length > 0 && chunkQueue[0].chunkIndex === expectedChunk) {
-          const chunk = chunkQueue.shift();
+        while (this.chunkQueue.length > 0 && this.chunkQueue[0].chunkIndex === expectedChunk) {
+          const chunk = this.chunkQueue.shift();
           if (chunk.data) {
+            if (this.debug) console.log(`%c[Processing] Chunk ${chunk.chunkIndex} (${chunk.data.byteLength} bytes) from ${chunk.provider}`, 'color: #009688');
             const decoded = decoder.process(chunk.data);
             this.video.feed(decoded);
           }
           expectedChunk++;
-          this.queueChunkFetch(cid, expectedChunk + this.providers.length - 1);
+          
+          // Prefetch next chunks
+          const nextChunk = expectedChunk + this.concurrentFetches - 1;
+          if (this.debug) console.log(`%c[Prefetch] Queuing chunk ${nextChunk}`, 'color: #FF5722');
+          this.queueChunkFetch(cid, nextChunk);
         }
       }
     }
@@ -70,11 +128,13 @@ class VideoController {
 
   queueChunkFetch(cid, chunkIndex) {
     if (this.activeFetches.has(chunkIndex)) return;
+    if (this.debug) console.log(`%c[Queue] Chunk ${chunkIndex}`, 'color: #FFC107');
 
     const fetchPromise = this.fetchChunk(cid, chunkIndex).then(result => {
       this.activeFetches.delete(chunkIndex);
       this.chunkQueue.push(result);
       this.chunkQueue.sort((a, b) => a.chunkIndex - b.chunkIndex);
+      if (this.debug) console.log(`%c[Complete] Chunk ${chunkIndex}`, 'color: #00BCD4');
     });
 
     this.activeFetches.set(chunkIndex, fetchPromise);
@@ -82,8 +142,10 @@ class VideoController {
 
   waitForNextChunk() {
     return new Promise(resolve => {
+      if (this.debug) console.log('%c[Wait] Starting chunk wait', 'color: #795548');
       const check = () => {
         if (this.chunkQueue.length > 0) {
+          if (this.debug) console.log('%c[Wait] Chunk ready', 'color: #4CAF50');
           resolve('chunk-ready');
         } else {
           setTimeout(check, 50);

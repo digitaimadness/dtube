@@ -50,6 +50,18 @@ const POPUP_TRANSITION_DURATION = 0.05; // seconds
 let currentProviderIndex = 0;
 const LOAD_TIMEOUT = 2000; // 2 seconds
 
+// Add at the top with other imports
+import VideoController from './videoController.js';
+
+// Add after video element initialization (~line 13)
+const providers = PROVIDERS.map(name => ({ 
+  name: providerDisplayNames[name],
+  fetch: (cid, start, end) => fetch(getProviderUrl(name, cid), { headers: { Range: `bytes=${start}-${end}` }})
+}));
+
+// Initialize VideoController (~line 44)
+const videoController = new VideoController(video, providers);
+
 // --- Helper Functions --- //
 
 /**
@@ -1421,3 +1433,24 @@ function getProviderFromUrl(url) {
   
   return 'unknown';
 }
+
+// Add playNextVideo function definition (~line 1300)
+function playNextVideo() {
+  videoController.loadVideoByDirection(1);
+}
+
+// Update preloadNextVideo to set on controller (~line 1316)
+videoController.preloadNextVideo = preloadNextVideo;
+
+// Update DOMContentLoaded handler (~line 1368)
+document.addEventListener('DOMContentLoaded', function() {
+  // ... existing code ...
+  if (video.readyState < 1) {
+    let loadTimeout = setTimeout(() => {
+      if (video.readyState < 1) {
+        playNextVideo(); // Now properly defined
+      }
+    }, 4000);
+    // ... rest of handler ...
+  }
+});
