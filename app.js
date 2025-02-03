@@ -608,6 +608,11 @@ class UIController {
     // Add pause/resume listeners
     this.video.addEventListener('play', () => this.startUpdates());
     this.video.addEventListener('pause', () => this.stopUpdates());
+
+    const progressContainer = this.controls.progressContainer;
+    progressContainer.addEventListener('pointerleave', () => {
+      progressContainer.classList.remove('active');
+    });
   }
 
   startUpdates() {
@@ -959,12 +964,31 @@ class UIController {
   }
 
   handlePointerMove(e) {
+    const progressRect = this.controls.progressContainer.getBoundingClientRect();
+    const bufferZone = 20; // pixels
+    const isNear = e.clientY >= progressRect.top - bufferZone && 
+                  e.clientY <= progressRect.bottom + bufferZone;
+
+    // Update proximity state
+    this.controls.progressContainer.classList.toggle('near', isNear);
+    
+    if (!this.state.isDragging) {
+      // Update active state only when not dragging
+      this.controls.progressContainer.classList.toggle('active', 
+        this.controls.progressContainer.matches(':hover')
+      );
+      return;
+    }
+    
     const position = this.calculateSeekPosition(e.clientX);
     this.updateTimestampPopupPreview(position.offsetX);
     if (this.state.isDragging) {
       this.video.currentTime = position.time;
       this.updatePlaybackProgress(this.video);
     }
+    
+    // Keep the expanded height during drag
+    this.controls.progressContainer.classList.add('dragging');
   }
 
   handlePointerDown(e) {
@@ -982,8 +1006,7 @@ class UIController {
     if (this.state.isDragging) {
       this.seek(e.clientX);
       this.state.isDragging = false;
-      this.controls.progressContainer.classList.remove("active");
-      this.controls.progressContainer.releasePointerCapture(e.pointerId);
+      this.controls.progressContainer.classList.remove('dragging', 'active', 'near');
       this.hideTimestampPopup();
       this.controls.progressBar.classList.remove('dragging');
     }
