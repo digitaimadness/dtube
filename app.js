@@ -62,6 +62,10 @@ const providers = PROVIDERS.map(name => ({
 // Initialize VideoController (~line 44)
 const videoController = new VideoController(video, providers);
 
+// Add this constant near other cache constants
+const CID_VALID_CACHE_KEY = 'validCidCache';
+const CID_VALIDITY_DURATION = 48 * 60 * 60 * 1000; // 48 hours
+
 // --- Helper Functions --- //
 
 /**
@@ -84,29 +88,38 @@ const getProviderUrl = (provider, cid) =>
     : `https://ipfs.${provider}/ipfs/${cid}`;
 
 /* Insert new helper function testProvider before loadVideoFromCid */
-function testProvider(url) {
+async function testProvider(url) {
   return new Promise((resolve, reject) => {
     const testVideo = document.createElement('video');
     testVideo.style.display = 'none';
+    testVideo.muted = true;
     let resolved = false;
+    
     const cleanup = () => {
       testVideo.remove();
       clearTimeout(timeout);
     };
+
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
         cleanup();
         reject(new Error('Timeout'));
       }
-    }, LOAD_TIMEOUT);
-    testVideo.addEventListener('canplay', () => {
-      if (!resolved) {
-        resolved = true;
-        cleanup();
+    }, 3000); // Increased timeout to 3 seconds
+
+    const verifyPlayable = async () => {
+      try {
+        await testVideo.play();
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for 500ms of playback
+        testVideo.pause();
         resolve(url);
+      } catch (error) {
+        reject(new Error('Playback test failed'));
       }
-    }, { once: true });
+    };
+
+    testVideo.addEventListener('loadeddata', verifyPlayable, { once: true });
     testVideo.addEventListener('error', () => {
       if (!resolved) {
         resolved = true;
@@ -114,17 +127,14 @@ function testProvider(url) {
         reject(new Error('Error loading video'));
       }
     }, { once: true });
+
     testVideo.src = url;
     document.body.appendChild(testVideo);
   });
 }
 
-/* Optimized loadVideoFromCid using testProvider and Promise.any */
-async function loadVideoFromCid(cid) {
-  const cacheKey = getCacheKey(cid);
-  const cachedUrl = localStorage.getItem(cacheKey);
-  if (cachedUrl) return cachedUrl;
-
+// Add this function above loadVideoFromCid
+async function validateCidThroughProviders(cid) {
   // Split providers into IPFS and non-IPFS groups
   const ipfsProviders = shuffleArray(PROVIDERS.filter(p => providerDisplayNames[p].includes('IPFS')));
   const otherProviders = shuffleArray(PROVIDERS.filter(p => !providerDisplayNames[p].includes('IPFS')));
@@ -136,13 +146,49 @@ async function loadVideoFromCid(cid) {
     return testProvider(url).then(() => url);
   });
 
-  try {
-    const validUrl = await Promise.any(providerPromises);
-    localStorage.setItem(cacheKey, validUrl);
-    return validUrl;
-  } catch (error) {
-    throw new Error("All providers failed");
+  return await Promise.any(providerPromises);
+}
+
+/* Optimized loadVideoFromCid using testProvider and Promise.any */
+async function loadVideoFromCid(cid) {
+  // Check cached validity first
+  const validCids = JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY) || '{}');
+  if (validCids[cid] && Date.now() < validCids[cid].expires) {
+    console.log(`Using validated CID from cache: ${cid}`);
+    return generateProviderUrl(cid, validCids[cid].lastWorkingProvider);
   }
+
+  // If not in cache, validate through providers
+  try {
+    const url = await validateCidThroughProviders(cid);
+    
+    // Update cache with working provider
+    const provider = new URL(url).hostname.split('.').slice(-2)[0];
+    validCids[cid] = {
+      expires: Date.now() + CID_VALIDITY_DURATION,
+      lastWorkingProvider: provider
+    };
+    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
+    
+    return url;
+  } catch (error) {
+    console.error(`CID validation failed for ${cid}:`, error);
+    throw new Error('CID validation failed');
+  }
+}
+
+// Add this helper function
+function generateProviderUrl(cid, preferredProvider) {
+  const providerOrder = [...PROVIDERS];
+  if (preferredProvider) {
+    providerOrder.unshift(...providerOrder.splice(providerOrder.indexOf(preferredProvider), 1));
+  }
+  
+  const providerIndex = providerIndices.get(cid) || 0;
+  const provider = providerOrder[providerIndex % providerOrder.length];
+  providerIndices.set(cid, providerIndex + 1);
+  
+  return `https://${cid}.ipfs.${provider}/`;
 }
 
 /**
@@ -153,7 +199,11 @@ async function loadNextVideo(retries = 0) {
   try {
     isLoading = true;
     controlsSystem.updateSpinner();
-    video.pause();
+    
+    // Abort any pending play requests
+    if (videoController.currentLoadAbortController) {
+      videoController.currentLoadAbortController.abort();
+    }
     
     // Clear existing source and force garbage collection
     video.src = "";
@@ -188,19 +238,39 @@ async function loadNextVideo(retries = 0) {
       });
     }
 
-    // Start playback with better buffering handling
+    // Modified playback section
     try {
       video.muted = true;
-      await video.play();
+      const playPromise = video.play();
+      
+      // Create new AbortController for this playback attempt
+      const abortController = new AbortController();
+      videoController.currentLoadAbortController = abortController;
+      
+      await Promise.race([
+        playPromise,
+        new Promise((_, reject) => {
+          abortController.signal.addEventListener('abort', 
+            () => reject(new Error('Playback aborted')),
+            { once: true }
+          );
+        })
+      ]);
+      
       video.muted = false;
-      // Start preloading next video after successful playback
       preloadNextVideo();
     } catch (error) {
-      console.error('Autoplay blocked', error);
-      // Show popup to inform user about muted autoplay
-      controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'warning');
+      if (error.name !== 'AbortError') {
+        console.error('Autoplay blocked', error);
+        controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'warning');
+      }
     }
   } catch (error) {
+    // Handle abort errors differently
+    if (error.message.includes('aborted')) {
+      console.log('Load sequence aborted for new request');
+      return;
+    }
     console.error('Error loading video:', error);
     // Skip to next video on error with retry limit
     if (retries < videoSources.length) {
@@ -1063,15 +1133,42 @@ class UIController {
     try {
       const currentCid = videoSources[currentVideoIndex];
       const url = await loadVideoFromCid(currentCid);
-      this.video.src = url;
-      await this.video.play();
-      this.showNotification(`Switched to ${getProviderFromUrl(url)}`, 'info', 2000);
+      
+      // Check if still in buffering state when we get the URL
+      if (!controlsSystem.bufferingState.isBuffering) {
+        console.log('Buffer recovered before provider switch');
+        return;
+      }
+      
+      // Abort any pending play requests before switching
+      if (videoController.currentLoadAbortController) {
+        videoController.currentLoadAbortController.abort();
+      }
+      
+      // Create new AbortController for recovery attempt
+      const abortController = new AbortController();
+      videoController.currentLoadAbortController = abortController;
+      
+      video.src = url;
+      await Promise.race([
+        video.play(),
+        new Promise((_, reject) => {
+          abortController.signal.addEventListener('abort',
+            () => reject(new Error('Recovery aborted')),
+            { once: true }
+          );
+        })
+      ]);
+      
+      controlsSystem.showNotification(`Switched to ${getProviderFromUrl(url)}`, 'info', 2000);
     } catch (error) {
-      console.error('Buffer recovery failed:', error);
-      loadNextVideo();
+      if (error.name !== 'AbortError') {
+        console.error('Buffer recovery failed:', error);
+        loadNextVideo();
+      }
     } finally {
-      this.bufferingState.isBuffering = false;
-      this.updateSpinner();
+      controlsSystem.bufferingState.isBuffering = false;
+      controlsSystem.updateSpinner();
     }
   }
 
@@ -1304,31 +1401,22 @@ function throttle(func, limit) {
 async function preloadNextVideo() {
   if (isPreloadingNext || videoSources.length === 0) return;
   isPreloadingNext = true;
-  const nextIndex = (currentVideoIndex + 1) % videoSources.length;
-  const cid = videoSources[nextIndex];
-  
+
   try {
-    // Check cache first
-    const cachedUrl = localStorage.getItem(getCacheKey(cid));
-    if (cachedUrl) {
-      preloadedNextUrl = cachedUrl;
-      console.log('Using cached URL for preload:', cachedUrl);
-      return;
-    }
+    const nextIndex = (currentVideoIndex + 1) % videoSources.length;
+    const cid = videoSources[nextIndex];
     
-    const url = await loadVideoFromCid(cid);
-    preloadedNextUrl = url;
-    console.log('Preloaded next video URL:', url);
-  } catch (error) {
-    console.error('Preloading next video failed:', error);
-    preloadedNextUrl = null;
+    // Validate CID before preloading
+    const url = await loadVideoFromCid(cid).catch(() => null);
+    if (url) {
+      const preloadVideo = document.createElement('video');
+      preloadVideo.src = url;
+      preloadVideo.preload = 'auto';
+      preloadedNextUrl = url;
+    }
   } finally {
     isPreloadingNext = false;
   }
-}
-
-function getCacheKey(cid) {
-  return `video_${cid}`;
 }
 
 /* Modified initHueEffects function */
