@@ -33,7 +33,7 @@ function formatTime(seconds) {
 class UIController {
   constructor(videoElement, uiElements) {
     // uiElements should be an object containing references to key DOM elements:
-    // progressContainer, progressBar, bufferBar, gesturePopup, leftZone, centerZone, rightZone, spinner.
+    // progressContainer, progressBar, bufferBar, notificationPopup, leftZone, centerZone, rightZone, spinner.
     this.video = videoElement;
     this.ui = uiElements;
     this.isDragging = false;
@@ -278,7 +278,7 @@ class UIController {
   }
 
   showToast(message) {
-    const popup = this.ui.gesturePopup;
+    const popup = this.ui.notificationPopup;
     if (!popup) return;
     popup.textContent = message;
     popup.style.display = 'flex';

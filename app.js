@@ -1,7 +1,14 @@
-
 // --- Global Constants and Variables --- //
 const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
+const providerDisplayNames = {
+  'io': 'IPFS',
+  'algonode.xyz': 'Algonode',
+  'eth.aragon.network': 'Aragon',
+  'dweb.link': 'IPFS',
+  'flk-ipfs.xyz': 'Fleek'
+};
 const VIDEO_CACHE_KEY = 'videoCache';
+const providerIndices = new Map(); // Tracks current provider index per CID
 
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
@@ -110,26 +117,24 @@ async function loadVideoFromCid(cid) {
   const cachedUrl = localStorage.getItem(cacheKey);
   if (cachedUrl) return cachedUrl;
 
-  const prioritizedProviders = ['io', 'dweb.link'];
-  const fallbackProviders = PROVIDERS.filter(provider => !prioritizedProviders.includes(provider));
+  // Split providers into IPFS and non-IPFS groups
+  const ipfsProviders = shuffleArray(PROVIDERS.filter(p => providerDisplayNames[p].includes('IPFS')));
+  const otherProviders = shuffleArray(PROVIDERS.filter(p => !providerDisplayNames[p].includes('IPFS')));
+  const allProviders = [...ipfsProviders, ...otherProviders];
 
-  let validUrl;
+  // Create test promises for all providers
+  const providerPromises = allProviders.map(provider => {
+    const url = getProviderUrl(provider, cid);
+    return testProvider(url).then(() => url);
+  });
+
   try {
-    const prioritizedPromises = prioritizedProviders.map(provider => {
-      const url = getProviderUrl(provider, cid);
-      return testProvider(url);
-    });
-    validUrl = await Promise.any(prioritizedPromises);
+    const validUrl = await Promise.any(providerPromises);
+    localStorage.setItem(cacheKey, validUrl);
+    return validUrl;
   } catch (error) {
-    const fallbackPromises = fallbackProviders.map(provider => {
-      const url = getProviderUrl(provider, cid);
-      return testProvider(url);
-    });
-    validUrl = await Promise.any(fallbackPromises);
+    throw new Error("All providers failed");
   }
-
-  localStorage.setItem(cacheKey, validUrl);
-  return validUrl;
 }
 
 /**
@@ -148,6 +153,7 @@ async function loadNextVideo(retries = 0) {
 
     if (preloadedNextUrl) {
       currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+      const cid = videoSources[currentVideoIndex];
       video.src = preloadedNextUrl;
       console.log('Loaded preloaded video URL:', preloadedNextUrl);
       
@@ -434,7 +440,7 @@ class UIController {
       progressContainer: document.querySelector('.progress-container'),
       progressBar: document.querySelector('.progress-bar'),
       bufferBar: document.querySelector('.buffer-bar'),
-      gesturePopup: document.getElementById('gesturePopup'),
+      notificationPopup: document.getElementById('gesturePopup'),
       leftZone: document.querySelector('.zone.left-zone'),
       centerZone: document.querySelector('.zone.center-zone'),
       rightZone: document.querySelector('.zone.right-zone'),
@@ -610,7 +616,7 @@ class UIController {
   }
 
   showGesturePopup(message, clickPos) {
-    const gp = this.controls.gesturePopup;
+    const gp = this.controls.notificationPopup;
     if (!gp) return;
     if (this.hideTimeout) {
       clearTimeout(this.hideTimeout);
@@ -1000,20 +1006,25 @@ class UIController {
       this.updateSpinner();
     }
     
-    // Clear any existing buffering timeout
     if (this.state.bufferingTimeout) clearTimeout(this.state.bufferingTimeout);
     
-    // Set a timeout and verify buffering state before proceeding
-    this.state.bufferingTimeout = setTimeout(() => {
-      // Only trigger if buffering persists after 2 seconds
+    this.state.bufferingTimeout = setTimeout(async () => {
       if (this.state.isBuffering) {
-        // Increment currentVideoIndex to skip the problematic video
-        currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
-        // End the buffering state before loading next video
+        const currentCid = videoSources[currentVideoIndex];
+        try {
+          const url = await loadVideoFromCid(currentCid);
+          video.src = url;
+          await video.play();
+          const provider = getProviderFromUrl(url);
+          this.showGesturePopup(`Switched to ${providerDisplayNames[provider]}`, 
+            { x: window.innerWidth/2, y: window.innerHeight/2 });
+        } catch (error) {
+          console.error('All providers failed, skipping video');
+          currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+          loadNextVideo();
+        }
         this.state.isBuffering = false;
         this.updateSpinner();
-        // Call loadNextVideo to load the next video in the list
-        loadNextVideo();
       }
     }, 2000);
   }
@@ -1291,4 +1302,15 @@ function playAudio() {
   }).catch(error => {
     console.error('Playback failed:', error);
   });
+}
+
+// Add this helper function near other utility functions
+function getProviderFromUrl(url) {
+  const subdomainMatch = url.match(/https?:\/\/(.+)\.ipfs\.([^\/]+)/);
+  if (subdomainMatch) return subdomainMatch[2];
+  
+  const pathMatch = url.match(/https?:\/\/ipfs\.([^\/]+)\/ipfs\/.+$/);
+  if (pathMatch) return pathMatch[1];
+  
+  return 'unknown';
 }

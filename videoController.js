@@ -9,17 +9,6 @@ class VideoController {
     this.commandQueue = [];
     this.isProcessingQueue = false;
     this.currentLoadAbortController = null;
-
-    // New properties for merged video navigation
-    this.videoSources = [];
-    this.currentVideoIndex = -1;
-    this.isLoading = false;
-    this.preloadedVideoUrl = null;
-
-    // Optional callbacks for UI updates
-    this.onAutoplayBlocked = null;
-    this.onLoadFailed = null;
-    this.onSpinnerUpdate = null;
   }
 
   async queueCommand(commandFn, timeout = 5000) {
@@ -177,6 +166,7 @@ class VideoController {
         }
       } else {
         // Previous video
+        this.preloadedVideoUrl = null;
         this.currentVideoIndex = (this.currentVideoIndex - 1 + this.videoSources.length) % this.videoSources.length;
         const cid = this.videoSources[this.currentVideoIndex];
         console.log('Attempting to load previous video with CID:', cid);
