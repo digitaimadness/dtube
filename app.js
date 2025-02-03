@@ -349,71 +349,34 @@ class ZoneInteractionHandler {
 class FrameAnalyzer {
   static samplingWidth = 32;
   static samplingHeight = 32;
-  static PIXEL_STEP = 16; // Increased from 8 to reduce data by 50%
+  static PIXEL_STEP = 16;
 
   constructor() {
     this.canvas = offscreenCanvas;
     this.ctx = offscreenCtx;
-    if (window.Worker) {
-      const workerCode = `
-        function rgbToHue(r, g, b) {
-          r /= 255;
-          g /= 255;
-          b /= 255;
-          const max = Math.max(r, g, b), min = Math.min(r, g, b);
-          let hue;
-          if (max === min) { hue = 0; } 
-          else if (max === r) { hue = (60 * ((g - b) / (max - min)) + 360) % 360; } 
-          else if (max === g) { hue = (60 * ((b - r) / (max - min)) + 120) % 360; } 
-          else { hue = (60 * ((r - g) / (max - min)) + 240) % 360; }
-          return hue;
-        }
-        self.onmessage = function(e) {
-          const { data, pixelCount } = e.data;
-          let r = 0, g = 0, b = 0;
-          for (let i = 0; i < data.length; i += pixelCount) {
-            r += data[i];
-            g += data[i + 1];
-            b += data[i + 2];
-          }
-          const totalPixels = pixelCount;
-          const avgR = r / totalPixels;
-          const avgG = g / totalPixels;
-          const avgB = b / totalPixels;
-          const hue = rgbToHue(avgR, avgG, avgB);
-          self.postMessage({ hue: hue });
-        };
-      `;
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      this.worker = new Worker(URL.createObjectURL(blob));
-    } else {
-      this.worker = null;
-    }
+    this.worker = this.initWorker();
   }
 
-  getDominantHue(video) {
+  initWorker() {
+    if (window.Worker) {
+      const worker = new Worker('workers/frameAnalyzer.worker.js');
+      worker.onmessage = (e) => this.currentHue = e.data.hue;
+      return worker;
+    }
+    return null;
+  }
+
+  async getDominantHue(video) {
     try {
       this.ctx.drawImage(video, 0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
       const imageData = this.ctx.getImageData(0, 0, FrameAnalyzer.samplingWidth, FrameAnalyzer.samplingHeight);
+      const reducedData = this.reducePixelData(imageData.data);
       
-      // Create reduced data array using larger step size
-      const reducedData = new Uint8Array(Math.ceil(imageData.data.length / (FrameAnalyzer.PIXEL_STEP * 4)) * 3);
-      let reducedIndex = 0;
-      for(let i = 0; i < imageData.data.length; i += FrameAnalyzer.PIXEL_STEP * 4) {
-        reducedData[reducedIndex++] = imageData.data[i];
-        reducedData[reducedIndex++] = imageData.data[i+1];
-        reducedData[reducedIndex++] = imageData.data[i+2];
-      }
-
       if (this.worker) {
-        return new Promise((resolve) => {
-          const handleMessage = (e) => { resolve(e.data.hue); };
-          this.worker.addEventListener('message', handleMessage, { once: true });
-          this.worker.postMessage({ 
-            data: reducedData,  // Send typed array directly
-            pixelCount: reducedData.length / 3
-          }, [reducedData.buffer]); // Transfer ownership
-        });
+        this.worker.postMessage({
+          data: reducedData,
+          pixelCount: reducedData.length / 3
+        }, [reducedData.buffer]);
       } else {
         return this.calculateAverageHue(imageData.data);
       }
@@ -421,6 +384,19 @@ class FrameAnalyzer {
       console.warn('Frame analysis error:', error);
       return 0;
     }
+  }
+
+  reducePixelData(data) {
+    const reduced = new Uint8Array(Math.ceil(data.length / (FrameAnalyzer.PIXEL_STEP * 4)) * 3);
+    let index = 0;
+    
+    for (let i = 0; i < data.length; i += FrameAnalyzer.PIXEL_STEP * 4) {
+      reduced[index++] = data[i];
+      reduced[index++] = data[i + 1];
+      reduced[index++] = data[i + 2];
+    }
+    
+    return reduced;
   }
 
   calculateAverageHue(data) {

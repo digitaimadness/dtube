@@ -4,31 +4,8 @@
  * It provides centralized UI updates, queued UI actions (if needed), and proper event handling for progress, popups, gestures, and fullscreen toggling.
  */
 
-// Utility functions
-function throttle(func, limit) {
-  let lastCall = 0;
-  let timeoutId;
-  return function(...args) {
-    const now = Date.now();
-    const remaining = limit - (now - lastCall);
-    if (remaining <= 0) {
-      func.apply(this, args);
-      lastCall = now;
-    } else {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        func.apply(this, args);
-        lastCall = Date.now();
-      }, remaining);
-    }
-  };
-}
-
-function formatTime(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return minutes + ':' + (secs < 10 ? '0' : '') + secs;
-}
+import { formatTime, throttle } from './utils/helpers.js';
+import { PROVIDERS, providerDisplayNames, getProviderUrl } from './config/videoConfig.js';
 
 class UIController {
   constructor(videoElement, uiElements) {

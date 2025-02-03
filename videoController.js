@@ -38,33 +38,36 @@ class VideoController {
     const start = chunkIndex * this.chunkSize;
     const end = start + this.chunkSize - 1;
     
-    if (this.debug) console.log(`%c[Fetch] Chunk ${chunkIndex} (${start}-${end})`, 'color: #3F51B5');
-
-    // Get providers sorted by performance (best first)
     const sortedProviders = this.getSortedProviders();
-    
+    const errors = [];
+
     for (const provider of sortedProviders) {
-      const stats = this.providerStats.get(provider);
       try {
-        if (this.debug) console.log(`%cTrying ${provider.name}...`, 'color: #607D8B');
         const startTime = performance.now();
-        const chunk = await provider.fetch(cid, start, end);
+        const response = await provider.fetch(cid, start, end);
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const buffer = await response.arrayBuffer();
         const fetchTime = performance.now() - startTime;
         
-        if (this.debug) console.log(`%cSuccess on ${provider.name} (${(fetchTime).toFixed(1)}ms)`, 'color: #8BC34A');
-        stats.successCount++;
-        stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + (this.chunkSize / (fetchTime / 1000))) / stats.successCount;
-        stats.lastUsed = Date.now();
-        
-        return { chunkIndex, data: chunk, provider: provider.name };
+        this.updateProviderStats(provider, fetchTime);
+        return { chunkIndex, data: new Uint8Array(buffer), provider: provider.name };
       } catch (error) {
-        if (this.debug) console.log(`%cFailed on ${provider.name}: ${error.message}`, 'color: #F44336');
-        stats.errorCount++;
-        console.warn(`Chunk ${chunkIndex} failed on ${provider.name}, trying next provider`);
+        errors.push(`${provider.name}: ${error.message}`);
       }
     }
-    console.groupEnd();
+
+    console.error(`Chunk ${chunkIndex} failed:\n${errors.join('\n')}`);
     throw new Error(`All providers failed for chunk ${chunkIndex}`);
+  }
+
+  updateProviderStats(provider, fetchTime) {
+    const stats = this.providerStats.get(provider);
+    stats.successCount++;
+    stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + 
+      (this.chunkSize / (fetchTime / 1000))) / stats.successCount;
+    stats.lastUsed = Date.now();
   }
 
   getSortedProviders() {

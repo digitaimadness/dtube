@@ -10,6 +10,11 @@
   --main-hue: 0; /* Centralized hue variable */
   --primary-color: hsl(var(--main-hue), 100%, 50%);
   --secondary-color: hsl(var(--main-hue), 80%, 60%);
+  --hue: 0;
+  --primary: hsl(var(--hue), 70%, 50%);
+  --primary-transparent: hsla(var(--hue), 70%, 50%, 0.2);
+  --secondary: hsl(var(--hue), 70%, 95%);
+  --background: hsl(var(--hue), 30%, 20%);
 }
 
 /* Reset margins and paddings */
@@ -159,7 +164,7 @@ body {
   left: 0;
   width: 0%;
   height: 100%;
-  background-color: #4caf50;
+  background-color: var(--primary);
   z-index: 2;
   transition: 
     width 0.2s linear,
@@ -636,7 +641,7 @@ video::-webkit-media-controls-fullscreen-button {
   opacity: 0;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 1000;
-  color: var(--primary-color);
+  color: var(--primary);
   border: 2px solid rgba(255, 255, 255, 0.2);
   padding: 20px;
 }
