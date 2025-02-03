@@ -17,7 +17,7 @@ video.controls = false; // Disable native controls
 
 // Offscreen canvas for optimized frame sampling
 const offscreenCanvas = document.createElement("canvas");
-const offscreenCtx = offscreenCanvas.getContext("2d");
+const offscreenCtx = offscreenCanvas.getContext("2d", { willReadFrequently: true });
 const samplingWidth = 32, samplingHeight = 32;
 offscreenCanvas.width = samplingWidth;
 offscreenCanvas.height = samplingHeight;
@@ -190,7 +190,7 @@ async function loadNextVideo(retries = 0) {
     } catch (error) {
       console.error('Autoplay blocked', error);
       // Show popup to inform user about muted autoplay
-      controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 });
+      controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'warning');
     }
   } catch (error) {
     console.error('Error loading video:', error);
@@ -200,7 +200,7 @@ async function loadNextVideo(retries = 0) {
       setTimeout(() => loadNextVideo(retries + 1), 0);
     } else {
       console.error('All videos failed to load after maximum retries.');
-      controlsSystem.showGesturePopup("All videos failed", { x: window.innerWidth/2, y: window.innerHeight/2 });
+      controlsSystem.showGesturePopup("All videos failed", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'error');
     }
   } finally {
     isLoading = false;
@@ -304,11 +304,11 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.ui.secsSeek(-15);
-        this.ui.showGesturePopup("Rewind 15s", clickPos);
+        this.ui.showGesturePopup("Rewind 15s", clickPos, 'info');
         break;
       case 3: 
         loadPreviousVideo();
-        this.ui.showGesturePopup("Previous Video", clickPos);
+        this.ui.showGesturePopup("Previous Video", clickPos, 'info');
         break;
     }
   }
@@ -320,11 +320,11 @@ class ZoneInteractionHandler {
         break;
       case 2: 
         this.ui.secsSeek(15);
-        this.ui.showGesturePopup("Forward 15s", clickPos);
+        this.ui.showGesturePopup("Forward 15s", clickPos, 'info');
         break;
       case 3:
         loadNextVideo();
-        this.ui.showGesturePopup("Next Video", clickPos);
+        this.ui.showGesturePopup("Next Video", clickPos, 'info');
         break;
     }
   }
@@ -615,55 +615,71 @@ class UIController {
     this.timestampPopup.style.display = 'block';
   }
 
-  showGesturePopup(message, clickPos) {
-    const gp = this.controls.notificationPopup;
-    if (!gp) return;
-    if (this.hideTimeout) {
-      clearTimeout(this.hideTimeout);
-      this.hideTimeout = null;
-    }
-    
-    // Get current progress bar color for consistency
-    const currentHue = this.frameAnalyzer.getDominantHue(this.video);
-    
-    // Apply matching styles with progress bar (updated opacity)
-    gp.style.cssText = `
-      display: flex;
-      opacity: 0;
-      transform: translate(-50%, -50%) scale(0);
-      transition: opacity 300ms ease, transform 300ms ease;
-      background: hsla(${currentHue}, 70%, 50%, 0.2);
-      color: hsla(${currentHue}, 70%, 95%, 0.9);
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 1.6em;
-      font-weight: bold;
-      text-shadow: 0 1px 3px hsla(${currentHue}, 70%, 20%, 0.4);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-      border: 2px solid hsla(${currentHue}, 70%, 35%, 0.8);
-      backdrop-filter: blur(4px);
-      min-width: auto;
-      white-space: nowrap;
-    `;
+  showNotification(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('notifications-container');
+    if (!container) return;
 
-    gp.offsetHeight; // trigger reflow
-    gp.textContent = message;
-    const posX = clickPos?.x ?? window.innerWidth/2;
-    const posY = clickPos?.y ?? window.innerHeight/2;
-    gp.style.left = `${posX}px`;
-    gp.style.top = `${posY}px`;
-    requestAnimationFrame(() => {
-      gp.style.opacity = '1';
-      gp.style.transform = 'translate(-50%, -50%) scale(1)';
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    // Notification icon
+    const icon = document.createElement('div');
+    icon.className = `notification-icon ${type}`;
+    
+    // Notification content
+    const content = document.createElement('div');
+    content.className = 'notification-content';
+    
+    const messageElem = document.createElement('div');
+    messageElem.className = 'notification-message';
+    messageElem.textContent = message;
+    
+    const timestamp = document.createElement('div');
+    timestamp.className = 'notification-timestamp';
+    timestamp.textContent = new Date().toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit'
     });
-    this.hideTimeout = setTimeout(() => {
-      gp.style.opacity = '0';
-      gp.style.transform = 'translate(-50%, -50%) scale(0)';
-      this.hideTimeout = setTimeout(() => {
-        gp.style.display = 'none';
-        this.hideTimeout = null;
-      }, 300);
-    }, 1000);
+
+    content.appendChild(messageElem);
+    content.appendChild(timestamp);
+    
+    notification.appendChild(icon);
+    notification.appendChild(content);
+    container.appendChild(notification);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      notification.classList.add('visible');
+    });
+
+    // Auto-dismiss after duration
+    setTimeout(() => {
+      notification.classList.add('exiting');
+      setTimeout(() => notification.remove(), 300);
+    }, duration);
+
+    // Manual dismiss on click
+    notification.addEventListener('click', () => {
+      notification.classList.add('exiting');
+      setTimeout(() => notification.remove(), 300);
+    });
+  }
+
+  showGesturePopup(message, position, type = 'info') {
+    this.showNotification(message, type);
+  }
+
+  showError(message) {
+    this.showNotification(message, 'error', 5000);
+  }
+
+  showSuccess(message) {
+    this.showNotification(message, 'success');
+  }
+
+  showWarning(message) {
+    this.showNotification(message, 'warning', 4000);
   }
 
   showControls() {
@@ -724,10 +740,10 @@ class UIController {
       // Handle double tap
       if (direction === 'right') {
         loadNextVideo();
-        this.showGesturePopup("Next Video", positions.right);
+        this.showGesturePopup("Next Video", positions.right, 'info');
       } else {
         loadPreviousVideo();
-        this.showGesturePopup("Previous Video", positions.left);
+        this.showGesturePopup("Previous Video", positions.left, 'info');
       }
       this.state.multiTapState[direction] = 0;
     } else {
@@ -737,7 +753,8 @@ class UIController {
         this.secsSeek(seconds);
         this.showGesturePopup(
           `${direction === 'right' ? 'Forward' : 'Rewind'} 15s`,
-          positions[direction]
+          positions[direction],
+          'info'
         );
         this.state.multiTapState[direction] = 0;
       }, 200);
@@ -753,7 +770,8 @@ class UIController {
       this.video.volume === (change > 0 ? 1 : 0) 
         ? `Volume ${change > 0 ? 'Max' : 'Min'}`
         : `Volume ${change > 0 ? '+' : '-'}`,
-      position
+      position,
+      'info'
     );
   }
 
@@ -767,22 +785,22 @@ class UIController {
     if (!document.fullscreenElement) {
       if (wrapper) {
         wrapper.requestFullscreen().then(() => {
-          this.showGesturePopup("Fullscreen", clickPos);
+          this.showGesturePopup("Fullscreen", clickPos, 'info');
           this.fullscreenUIHidden = false;
           this.showControls(); // Show controls immediately when entering fullscreen
         }).catch(err => {
           console.error(`Error attempting fullscreen: ${err.message}`);
-          this.showGesturePopup("Fullscreen", clickPos);
+          this.showGesturePopup("Fullscreen", clickPos, 'error');
         });
       }
     } else {
       document.exitFullscreen().then(() => {
-        this.showGesturePopup("Windowed", clickPos);
+        this.showGesturePopup("Windowed", clickPos, 'info');
         this.fullscreenUIHidden = false;
         this.showControls(); // Ensure controls are visible when exiting
       }).catch(err => {
         console.error(`Error exiting fullscreen: ${err.message}`);
-        this.showGesturePopup("Windowed", clickPos);
+        this.showGesturePopup("Windowed", clickPos, 'error');
       });
     }
   }
@@ -889,14 +907,14 @@ class UIController {
       // Unmute on first user interaction
       this.video.muted = false;
       this.video.play().then(() => {
-        this.showGesturePopup("Play", clickPos);
+        this.showGesturePopup("Play", clickPos, 'info');
       }).catch(err => {
         console.error("Error playing video:", err);
-        this.showGesturePopup("Play", clickPos);
+        this.showGesturePopup("Play", clickPos, 'error');
       });
     } else {
       this.video.pause();
-      this.showGesturePopup("Pause", clickPos);
+      this.showGesturePopup("Pause", clickPos, 'info');
     }
   }
 
@@ -1016,10 +1034,9 @@ class UIController {
           video.src = url;
           await video.play();
           const provider = getProviderFromUrl(url);
-          this.showGesturePopup(`Switched to ${providerDisplayNames[provider]}`, 
-            { x: window.innerWidth/2, y: window.innerHeight/2 });
+          this.showNotification(`Switched to ${providerDisplayNames[provider]}`, 'info', 2000);
         } catch (error) {
-          console.error('All providers failed, skipping video');
+          console.error('All providers failed, skipping video', error);
           currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
           loadNextVideo();
         }
