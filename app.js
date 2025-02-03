@@ -75,6 +75,9 @@ class CidValidationError extends Error {
   }
 }
 
+// Add with other global variables (~line 32)
+let isSeeking = false;
+
 // --- Helper Functions --- //
 
 /**
@@ -637,8 +640,8 @@ class UIController {
     const wrapper = document.querySelector('.video-wrapper');
     const handler = this.handleUnifiedPointerEvent.bind(this);
     
-    // Use passive listeners where possible
-    wrapper.addEventListener('pointerdown', handler, { passive: true });
+    // Use passive: false for pointerdown to allow preventDefault
+    wrapper.addEventListener('pointerdown', handler, { passive: false });
     wrapper.addEventListener('pointermove', throttle(handler, 32), { passive: true });
     wrapper.addEventListener('pointerup', handler, { passive: true });
     wrapper.addEventListener('pointercancel', handler, { passive: true });
@@ -1047,18 +1050,20 @@ class UIController {
   handlePointerDown(e) {
     e.preventDefault();
     this.state.isDragging = true;
+    isSeeking = true;
     this.showControls();
     this.controls.progressContainer.setPointerCapture(e.pointerId);
-    this.seek(e.clientX); // Direct seek on pointer down
+    this.seek(e.clientX);
     this.timestampPopup.style.display = 'block';
     this.controls.progressBar.classList.add('dragging');
-    this.updateTimestampPopupPreview(this.calculateSeekPosition(e.clientX).offsetX); // Initial position
+    this.updateTimestampPopupPreview(this.calculateSeekPosition(e.clientX).offsetX);
   }
 
   handlePointerUp(e) {
     if (this.state.isDragging) {
       this.seek(e.clientX);
       this.state.isDragging = false;
+      isSeeking = false;
       this.controls.progressContainer.classList.remove('dragging', 'active', 'near');
       this.hideTimestampPopup();
       this.controls.progressBar.classList.remove('dragging');
@@ -1067,6 +1072,8 @@ class UIController {
 
   secsSeek(seconds) {
     this.video.currentTime = Math.max(0, this.video.currentTime + seconds);
+    isSeeking = true;
+    setTimeout(() => isSeeking = false, 100);
   }
 
   togglePlayPause(clickPos) {
@@ -1135,6 +1142,7 @@ class UIController {
   handlePopupDragStart(e) {
     e.preventDefault();
     this.state.isDraggingPopup = true;
+    isSeeking = true;
     const position = this.calculateSeekPosition(e.clientX);
     this.video.currentTime = position.time;
     this.controls.progressBar.style.width = `${(position.time / this.video.duration) * 100}%`;
@@ -1155,6 +1163,7 @@ class UIController {
   handlePopupDragEnd(e) {
     this.state.isDraggingPopup = false;
     this.state.cachedRect = null;
+    isSeeking = false;
     this.controls.progressBar.classList.remove('dragging');
     this.timestampPopup.style.cursor = 'grab';
     this.timestampPopup.releasePointerCapture(e.pointerId);
@@ -1207,45 +1216,47 @@ class UIController {
           video.addEventListener('playing', resolve, { once: true });
           video.addEventListener('error', resolve, { once: true });
         }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Buffer recovery timeout')), bufferTimeout)
-        )
-      ]);
-    } catch (error) {
-      if (!recoveryAbortController.signal.aborted) {
-        console.log('Attempting buffer recovery for current video...');
-        
-        // Reset provider index for this CID
-        providerIndices.set(currentCid, 0);
+        new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Buffer recovery timeout'));
+          }, bufferTimeout);
+        })
+      ]).catch(async (error) => {
+        if (!recoveryAbortController.signal.aborted) {
+          console.log('Attempting buffer recovery for current video...');
+          
+          // Reset provider index for this CID
+          providerIndices.set(currentCid, 0);
 
-        // Get new URL from different provider
-        const newUrl = generateProviderUrl(currentCid, 
-          JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
-        );
-        
-        // Preserve playback state
-        video.src = newUrl;
-        video.currentTime = currentTime;
-        
-        // Wait for enough data to resume
-        await new Promise((resolve) => {
-          video.addEventListener('canplaythrough', resolve, { once: true });
-        });
-        
-        // Attempt playback with 3 retries
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            await video.play();
-            break;
-          } catch (error) {
-            if (attempt === 2) {
-              console.log('Final recovery attempt failed, switching video');
-              loadNextVideo();
+          // Get new URL from different provider
+          const newUrl = generateProviderUrl(currentCid, 
+            JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
+          );
+          
+          // Preserve playback state
+          video.src = newUrl;
+          video.currentTime = currentTime;
+          
+          // Wait for enough data to resume
+          await new Promise((resolve) => {
+            video.addEventListener('canplaythrough', resolve, { once: true });
+          });
+          
+          // Attempt playback with 3 retries
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              await video.play();
+              break;
+            } catch (error) {
+              if (attempt === 2) {
+                console.log('Final recovery attempt failed, switching video');
+                loadNextVideo();
+              }
             }
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
         }
-      }
+      });
     } finally {
       isRecovering = false;
       recoveryAbortController.abort();
@@ -1326,8 +1337,16 @@ function registerVideoEventListeners() {
 
   // Add these new event listeners
   video.addEventListener("waiting", () => {
-    if (controlsSystem) {
-      controlsSystem.handleBufferingStart();
+    if (!bufferingUpdateScheduled && !isSeeking) {
+      bufferingUpdateScheduled = true;
+      setTimeout(() => {
+        if (video.readyState < 4 && !isRecovering && !isSeeking) {
+          isRecovering = true;
+          console.log('Attempting buffer recovery...');
+          handleBufferRecovery();
+        }
+        bufferingUpdateScheduled = false;
+      }, 1000);
     }
   });
 
@@ -1340,6 +1359,16 @@ function registerVideoEventListeners() {
   video.addEventListener("ended", () => {
     loadNextVideo();
   }, { passive: true });
+
+  video.addEventListener('seeking', () => {
+    isSeeking = true;
+    if (controlsSystem) controlsSystem.handleBufferingStart(true);
+  });
+
+  video.addEventListener('seeked', () => {
+    isSeeking = false;
+    if (controlsSystem) controlsSystem.handleBufferingEnd();
+  });
 }
 
 // --- Update main() to instantiate ControlsSystem --- //
@@ -1655,3 +1684,81 @@ function handleArrowKey(direction) {
     showGestureNotification(actionMap[direction].message, actionMap[direction].type);
   }
 }
+
+// Add this function near other video control functions (~line 1300)
+function handleBufferRecovery() {
+  if (isRecovering) return;
+  isRecovering = true;
+  
+  const currentTime = video.currentTime;
+  const currentCid = videoSources[currentVideoIndex];
+  const bufferTimeout = 1000;
+  const recoveryAbortController = new AbortController();
+  
+  try {
+    Promise.race([
+      new Promise(resolve => {
+        video.addEventListener('playing', resolve, { once: true });
+        video.addEventListener('error', resolve, { once: true });
+      }),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Buffer recovery timeout'));
+        }, bufferTimeout);
+      })
+    ]).catch(async (error) => {
+      if (!recoveryAbortController.signal.aborted) {
+        console.log('Attempting buffer recovery for current video...');
+        
+        // Reset provider index for this CID
+        providerIndices.set(currentCid, 0);
+
+        // Get new URL from different provider
+        const newUrl = generateProviderUrl(currentCid, 
+          JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
+        );
+        
+        // Preserve playback state
+        video.src = newUrl;
+        video.currentTime = currentTime;
+        
+        // Wait for enough data to resume
+        await new Promise((resolve) => {
+          video.addEventListener('canplaythrough', resolve, { once: true });
+        });
+        
+        // Attempt playback with 3 retries
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await video.play();
+            break;
+          } catch (error) {
+            if (attempt === 2) {
+              console.log('Final recovery attempt failed, switching video');
+              loadNextVideo();
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+    });
+  } finally {
+    isRecovering = false;
+    recoveryAbortController.abort();
+  }
+}
+
+// Update the waiting event listener to use the new function
+video.addEventListener("waiting", () => {
+  if (!bufferingUpdateScheduled && !isSeeking) {
+    bufferingUpdateScheduled = true;
+    setTimeout(() => {
+      if (video.readyState < 4 && !isRecovering && !isSeeking) {
+        isRecovering = true;
+        console.log('Attempting buffer recovery...');
+        handleBufferRecovery(); // Now calls the global function
+      }
+      bufferingUpdateScheduled = false;
+    }, 1000);
+  }
+});

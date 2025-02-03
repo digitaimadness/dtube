@@ -31,6 +31,7 @@ class VideoController {
     this.isLoading = false;
     this.debug = true; // Set to false to disable logging
     this.chunkColors = new Map();
+    this.isSeeking = false;
   }
 
   // Chunk streaming methods
@@ -198,10 +199,23 @@ class VideoController {
           this.video.removeEventListener('seeked', onSeeked);
           resolve();
         };
+        
         this.video.addEventListener('seeked', onSeeked, { once: true });
         this.video.currentTime = time;
+        
+        // Add seeking state management
+        if (!this.video.seeking) {
+          this.isSeeking = true;
+          const onSeeking = () => {
+            this.isSeeking = true;
+            this.video.removeEventListener('seeking', onSeeking);
+          };
+          this.video.addEventListener('seeking', onSeeking, { once: true });
+        }
       });
-    }, timeout);
+    }, timeout).finally(() => {
+      this.isSeeking = false;
+    });
   }
 
   async seekBy(delta, timeout = 3000) {
