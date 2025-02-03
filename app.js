@@ -1,7 +1,7 @@
 // --- Global Constants and Variables --- //
-const PROVIDERS = ['io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
+const PROVIDERS = ['ipfs.io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
 const providerDisplayNames = {
-  'io': 'IPFS',
+  'ipfs.io': 'IPFS Gateway',
   'algonode.xyz': 'Algonode',
   'eth.aragon.network': 'Aragon',
   'dweb.link': 'IPFS',
@@ -29,6 +29,7 @@ let preloadedNextUrl = null;
 let isPreloadingNext = false;
 let bufferingUpdateScheduled = false;
 let isBuffering = false;
+let isRecovering = false; // Add to top with other globals
 
 // Add these constants with other global constants
 const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
@@ -66,6 +67,14 @@ const videoController = new VideoController(video, providers);
 const CID_VALID_CACHE_KEY = 'validCidCache';
 const CID_VALIDITY_DURATION = 48 * 60 * 60 * 1000; // 48 hours
 
+// Add this error class near the top with other constants
+class CidValidationError extends Error {
+  constructor(cid) {
+    super(`CID validation failed for ${cid}`);
+    this.cid = cid;
+  }
+}
+
 // --- Helper Functions --- //
 
 /**
@@ -82,10 +91,15 @@ function shuffleArray(array) {
 /**
  * Constructs the URL to access the video through a given provider.
  */
-const getProviderUrl = (provider, cid) =>
-  ["dweb.link", "flk-ipfs.xyz"].includes(provider)
+const getProviderUrl = (provider, cid) => {
+  // Handle special case for ipfs.io
+  if (provider === 'ipfs.io') {
+    return `https://ipfs.io/ipfs/${cid}`;
+  }
+  return ["dweb.link", "flk-ipfs.xyz"].includes(provider)
     ? `https://${cid}.ipfs.${provider}`
     : `https://ipfs.${provider}/ipfs/${cid}`;
+};
 
 /* Insert new helper function testProvider before loadVideoFromCid */
 async function testProvider(url) {
@@ -158,7 +172,6 @@ async function loadVideoFromCid(cid) {
     return generateProviderUrl(cid, validCids[cid].lastWorkingProvider);
   }
 
-  // If not in cache, validate through providers
   try {
     const url = await validateCidThroughProviders(cid);
     
@@ -173,7 +186,12 @@ async function loadVideoFromCid(cid) {
     return url;
   } catch (error) {
     console.error(`CID validation failed for ${cid}:`, error);
-    throw new Error('CID validation failed');
+    
+    // Remove invalid CID from cache
+    delete validCids[cid];
+    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
+    
+    throw new CidValidationError(cid);
   }
 }
 
@@ -188,7 +206,7 @@ function generateProviderUrl(cid, preferredProvider) {
   const provider = providerOrder[providerIndex % providerOrder.length];
   providerIndices.set(cid, providerIndex + 1);
   
-  return `https://${cid}.ipfs.${provider}/`;
+  return getProviderUrl(provider, cid);
 }
 
 /**
@@ -200,11 +218,19 @@ async function loadNextVideo(retries = 0) {
     isLoading = true;
     controlsSystem.updateSpinner();
     
-    // Abort any pending play requests
+    // Create new abort controller for each attempt
     if (videoController.currentLoadAbortController) {
       videoController.currentLoadAbortController.abort();
+      videoController.currentLoadAbortController = null; // Clear previous
     }
-    
+    const abortController = new AbortController();
+    videoController.currentLoadAbortController = abortController;
+
+    // Add abort check before load
+    if (abortController.signal.aborted) {
+      throw new Error("Load aborted before start");
+    }
+
     // Clear existing source and force garbage collection
     video.src = "";
     await new Promise(resolve => requestAnimationFrame(resolve));
@@ -243,10 +269,6 @@ async function loadNextVideo(retries = 0) {
       video.muted = true;
       const playPromise = video.play();
       
-      // Create new AbortController for this playback attempt
-      const abortController = new AbortController();
-      videoController.currentLoadAbortController = abortController;
-      
       await Promise.race([
         playPromise,
         new Promise((_, reject) => {
@@ -262,24 +284,40 @@ async function loadNextVideo(retries = 0) {
     } catch (error) {
       if (error.name !== 'AbortError') {
         console.error('Autoplay blocked', error);
-        controlsSystem.showGesturePopup("Click to unmute", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'warning');
+        controlsSystem.showNotification("Click to unmute", 'warning');
       }
     }
   } catch (error) {
-    // Handle abort errors differently
-    if (error.message.includes('aborted')) {
-      console.log('Load sequence aborted for new request');
-      return;
-    }
     console.error('Error loading video:', error);
-    // Skip to next video on error with retry limit
-    if (retries < videoSources.length) {
-      console.log(`Retrying (${retries + 1}/${videoSources.length})...`);
-      setTimeout(() => loadNextVideo(retries + 1), 0);
-    } else {
-      console.error('All videos failed to load after maximum retries.');
-      controlsSystem.showGesturePopup("All videos failed", { x: window.innerWidth/2, y: window.innerHeight/2 }, 'error');
+    
+    // Handle CID validation errors differently
+    if (error instanceof CidValidationError) {
+      console.log(`Skipping invalid CID: ${error.cid}`);
+      
+      // Remove invalid CID from video sources
+      const invalidIndex = videoSources.indexOf(error.cid);
+      if (invalidIndex > -1) {
+        videoSources.splice(invalidIndex, 1);
+      }
+      
+      // Immediately try next video without counting as retry
+      if (videoSources.length > 0) {
+        currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
+        return loadNextVideo(0);
+      }
     }
+
+    // Regular error handling
+    const MAX_RETRIES = 3;
+    if (retries < MAX_RETRIES && !(error instanceof CidValidationError)) {
+      console.log(`Retrying (${retries + 1}/${MAX_RETRIES})...`);
+      await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)));
+      return loadNextVideo(retries + 1);
+    }
+    
+    // Final error handling
+    console.error('All videos failed to load after maximum retries.');
+    controlsSystem.showNotification("All videos failed", 'error');
   } finally {
     isLoading = false;
     controlsSystem.updateSpinner();
@@ -386,7 +424,7 @@ class ZoneInteractionHandler {
         break;
       case 3: 
         loadPreviousVideo();
-        this.ui.showGesturePopup("Previous Video", clickPos, 'info');
+        this.ui.showNotification("⏮ Previous Video", 'info');
         break;
     }
   }
@@ -402,7 +440,7 @@ class ZoneInteractionHandler {
         break;
       case 3:
         loadNextVideo();
-        this.ui.showGesturePopup("Next Video", clickPos, 'info');
+        this.ui.showNotification("⏭ Next Video", 'info');
         break;
     }
   }
@@ -766,8 +804,25 @@ class UIController {
     });
   }
 
-  showGesturePopup(message, position, type = 'info') {
-    this.showNotification(message, type);
+  showGestureNotification(message, type = 'info', duration = 1500) {
+    const container = document.getElementById('notifications-container');
+    if (!container) return;
+
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.innerHTML = `
+      <div class="notification-content">
+        <div class="notification-message">${message}</div>
+      </div>
+    `;
+
+    container.appendChild(notification);
+    requestAnimationFrame(() => notification.classList.add('visible'));
+
+    setTimeout(() => {
+      notification.classList.add('exiting');
+      setTimeout(() => notification.remove(), 300);
+    }, duration);
   }
 
   showError(message) {
@@ -840,10 +895,10 @@ class UIController {
       // Handle double tap
       if (direction === 'right') {
         loadNextVideo();
-        this.showGesturePopup("Next Video", positions.right, 'info');
+        this.showNotification("⏭ Next Video", 'info');
       } else {
         loadPreviousVideo();
-        this.showGesturePopup("Previous Video", positions.left, 'info');
+        this.showNotification("⏮ Previous Video", 'info');
       }
       this.state.multiTapState[direction] = 0;
     } else {
@@ -851,9 +906,8 @@ class UIController {
       this.state.arrowTimeout = setTimeout(() => {
         const seconds = direction === 'right' ? 15 : -15;
         this.secsSeek(seconds);
-        this.showGesturePopup(
+        this.showNotification(
           `${direction === 'right' ? 'Forward' : 'Rewind'} 15s`,
-          positions[direction],
           'info'
         );
         this.state.multiTapState[direction] = 0;
@@ -866,11 +920,10 @@ class UIController {
     const position = change > 0 
       ? { x: window.innerWidth / 2, y: 100 }
       : { x: window.innerWidth / 2, y: window.innerHeight - 100 };
-    this.showGesturePopup(
+    this.showNotification(
       this.video.volume === (change > 0 ? 1 : 0) 
         ? `Volume ${change > 0 ? 'Max' : 'Min'}`
         : `Volume ${change > 0 ? '+' : '-'}`,
-      position,
       'info'
     );
   }
@@ -885,22 +938,22 @@ class UIController {
     if (!document.fullscreenElement) {
       if (wrapper) {
         wrapper.requestFullscreen().then(() => {
-          this.showGesturePopup("Fullscreen", clickPos, 'info');
+          this.showNotification("Fullscreen", 'info');
           this.fullscreenUIHidden = false;
           this.showControls(); // Show controls immediately when entering fullscreen
         }).catch(err => {
           console.error(`Error attempting fullscreen: ${err.message}`);
-          this.showGesturePopup("Fullscreen", clickPos, 'error');
+          this.showNotification("Fullscreen", 'error');
         });
       }
     } else {
       document.exitFullscreen().then(() => {
-        this.showGesturePopup("Windowed", clickPos, 'info');
+        this.showNotification("Windowed", 'info');
         this.fullscreenUIHidden = false;
         this.showControls(); // Ensure controls are visible when exiting
       }).catch(err => {
         console.error(`Error exiting fullscreen: ${err.message}`);
-        this.showGesturePopup("Windowed", clickPos, 'error');
+        this.showNotification("Windowed", 'error');
       });
     }
   }
@@ -1139,59 +1192,31 @@ class UIController {
     }
   }
 
-  handleBufferingStart() {
-    if (!this.bufferingState.isBuffering) {
-      this.bufferingState.isBuffering = true;
-      this.updateSpinner();
-      
-      this.bufferingState.timeoutId = setTimeout(async () => {
-        if (this.bufferingState.isBuffering) {
-          await this.handleBufferTimeout();
-        }
-      }, 2000);
-    }
-  }
-
-  async handleBufferTimeout() {
+  async handleBufferingStart() {
+    if (isRecovering) return;
+    isRecovering = true;
+    
+    const bufferTimeout = 5000; // Reduced from 10s
+    const recoveryAbortController = new AbortController();
+    
     try {
-      const currentCid = videoSources[currentVideoIndex];
-      const url = await loadVideoFromCid(currentCid);
-      
-      // Check if still in buffering state when we get the URL
-      if (!controlsSystem.bufferingState.isBuffering) {
-        console.log('Buffer recovered before provider switch');
-        return;
-      }
-      
-      // Abort any pending play requests before switching
-      if (videoController.currentLoadAbortController) {
-        videoController.currentLoadAbortController.abort();
-      }
-      
-      // Create new AbortController for recovery attempt
-      const abortController = new AbortController();
-      videoController.currentLoadAbortController = abortController;
-      
-      video.src = url;
       await Promise.race([
-        video.play(),
-        new Promise((_, reject) => {
-          abortController.signal.addEventListener('abort',
-            () => reject(new Error('Recovery aborted')),
-            { once: true }
-          );
-        })
+        new Promise(resolve => {
+          video.addEventListener('playing', resolve, { once: true });
+          video.addEventListener('error', resolve, { once: true });
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Buffer recovery timeout')), bufferTimeout)
+        )
       ]);
-      
-      controlsSystem.showNotification(`Switched to ${getProviderFromUrl(url)}`, 'info', 2000);
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.error('Buffer recovery failed:', error);
-        loadNextVideo();
+      if (!recoveryAbortController.signal.aborted) {
+        console.log('Attempting buffer recovery...');
+        await loadNextVideo();
       }
     } finally {
-      controlsSystem.bufferingState.isBuffering = false;
-      controlsSystem.updateSpinner();
+      isRecovering = false;
+      recoveryAbortController.abort();
     }
   }
 
@@ -1499,15 +1524,24 @@ function updateDisplay() {
 }
 
 // Updated playAudio function with proper loop handling
-function playAudio() {
-  video.play().then(() => {
-    // Only start the loop if playback succeeded
-    if (!video.paused) {
+async function playAudio() {
+  // Add loading check
+  if (isLoading) {
+    console.log('Delaying play until load completes');
+    return;
+  }
+
+  try {
+    await video.play();
+    if (!isLoading) { // Only update if not loading
       updateDisplay();
     }
-  }).catch(error => {
+  } catch (error) {
     console.error('Playback failed:', error);
-  });
+    if (error.name === 'AbortError') {
+      console.log('Playback aborted during load');
+    }
+  }
 }
 
 // Add this helper function near other utility functions
@@ -1541,3 +1575,51 @@ document.addEventListener('DOMContentLoaded', function() {
     // ... rest of handler ...
   }
 });
+
+// Add this function near other UI utilities
+function showGestureNotification(message, type = 'info', duration = 1500) {
+  const container = document.getElementById('notifications-container');
+  if (!container) return;
+
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.innerHTML = `
+    <div class="notification-content">
+      <div class="notification-message">${message}</div>
+    </div>
+  `;
+
+  container.appendChild(notification);
+  requestAnimationFrame(() => notification.classList.add('visible'));
+
+  setTimeout(() => {
+    notification.classList.add('exiting');
+    setTimeout(() => notification.remove(), 300);
+  }, duration);
+}
+
+// Replace the old showGesturePopup implementation
+function handleGesture(direction) {
+  const messages = {
+    left: '⏪ Rewind 15s',
+    right: '⏩ Fast-forward 15s',
+    up: '⏫ Volume Up',
+    down: '⏬ Volume Down',
+    next: '⏭ Next Video',
+    previous: '⏮ Previous Video'
+  };
+
+  showGestureNotification(messages[direction], 'info');
+}
+
+// Update the arrow key handler in app.js
+function handleArrowKey(direction) {
+  const actionMap = {
+    left: { message: '⏪ Rewind 15s', type: 'info' },
+    right: { message: '⏩ Fast-forward 15s', type: 'info' }
+  };
+
+  if (actionMap[direction]) {
+    showGestureNotification(actionMap[direction].message, actionMap[direction].type);
+  }
+}

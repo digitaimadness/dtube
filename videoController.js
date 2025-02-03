@@ -263,6 +263,18 @@ class VideoController {
   }
 
   async loadVideoByDirection(direction, retries = 0) {
+    // Add load state synchronization
+    if (this.isLoading) {
+      console.log('Load already in progress, queuing direction change');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return this.loadVideoByDirection(direction, retries);
+    }
+
+    // Add abort check early in the process
+    if (this.currentLoadAbortController?.signal.aborted) {
+      return;
+    }
+
     // direction: +1 for next, -1 for previous
     if (this.isLoading || !this.videoSources.length) return;
     this.isLoading = true;

@@ -93,10 +93,10 @@ class UIController {
         this.toggleFullscreen();
         break;
       case 'ArrowRight':
-        this.seekForward();
+        this.handleArrowKey('right', e);
         break;
       case 'ArrowLeft':
-        this.seekBackward();
+        this.handleArrowKey('left', e);
         break;
       default:
         break;
@@ -174,10 +174,12 @@ class UIController {
   togglePlayPause() {
     this.resetControlsTimeout();
     if (this.video.paused) {
-      this.video.play().then(() => this.showToast('Play')).catch(err => this.showToast('Play Error'));
+      this.video.play().then(() => {
+        this.showFastSeekAnimation('play');
+      }).catch(err => console.error('Play error:', err));
     } else {
       this.video.pause();
-      this.showToast('Pause');
+      this.showFastSeekAnimation('pause');
     }
   }
 
@@ -199,15 +201,37 @@ class UIController {
     }
   }
 
-  seekForward() {
-    // Seek 15 seconds forward
-    this.video.currentTime = Math.min(this.video.duration, this.video.currentTime + 15);
-    this.showToast('Forward 15s');
-  }
+  handleArrowKey(direction, e) {
+    const positions = {
+      right: { x: window.innerWidth - 100, y: window.innerHeight / 2 },
+      left: { x: 100, y: window.innerHeight / 2 }
+    };
 
-  seekBackward() {
-    this.video.currentTime = Math.max(0, this.video.currentTime - 15);
-    this.showToast('Rewind 15s');
+    if (this.state.arrowTimeout) {
+      clearTimeout(this.state.arrowTimeout);
+      this.state.arrowTimeout = null;
+    }
+
+    const tapCount = (this.state.multiTapState?.[direction] || 0) + 1;
+    this.state.multiTapState = { ...this.state.multiTapState, [direction]: tapCount };
+
+    if (tapCount === 2) {
+      if (direction === 'right') {
+        loadNextVideo();
+        this.showFastSeekAnimation('right');
+      } else {
+        loadPreviousVideo();
+        this.showFastSeekAnimation('left');
+      }
+      this.state.multiTapState[direction] = 0;
+    } else {
+      this.state.arrowTimeout = setTimeout(() => {
+        const seconds = direction === 'right' ? 15 : -15;
+        this.secsSeek(seconds);
+        this.showFastSeekAnimation(direction);
+        this.state.multiTapState[direction] = 0;
+      }, 200);
+    }
   }
 
   handleUnifiedPointerEvent(e) {
@@ -235,20 +259,14 @@ class UIController {
   }
 
   handlePointerMove(e) {
-    if (!this.state.isDragging) return;
+    if (!this.isDragging) return;
     
-    const rect = this.controls.progressContainer.getBoundingClientRect();
+    const rect = this.ui.progressContainer.getBoundingClientRect();
     const offsetX = e.clientX - rect.left;
     const percent = Math.min(Math.max(0, offsetX / rect.width), 1);
     
-    // Update popup position
     this.timestampPopup.style.left = `${percent * 100}%`;
     this.timestampPopup.textContent = formatTime(percent * this.video.duration);
-    
-    // Maintain vertical distance
-    this.timestampPopup.style.transform = `translateX(-50%) translateY(${
-      this.state.isDragging ? '-8px' : '0'
-    })`;
   }
 
   handlePointerUp(e) {
@@ -279,29 +297,25 @@ class UIController {
     }
   }
 
-  showToast(message) {
-    const popup = this.ui.notificationPopup;
-    if (!popup) return;
-    popup.textContent = message;
-    popup.style.display = 'flex';
-    popup.style.opacity = '1';
-    setTimeout(() => {
-      popup.style.opacity = '0';
-      setTimeout(() => popup.style.display = 'none', 300);
-    }, 1000);
-  }
-
   showNotification(message, type = 'info') {
-    const notificationsEl = document.querySelector('.notifications');
+    const notificationsEl = document.getElementById('notifications-container');
     if (!notificationsEl) return;
-    
-    notificationsEl.textContent = message;
-    notificationsEl.className = `notifications ${type}`;
-    notificationsEl.classList.add('show');
-    
+
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.innerHTML = `
+      <div class="notification-content">
+        <div class="notification-message">${message}</div>
+        <div class="notification-timestamp">${new Date().toLocaleTimeString()}</div>
+      </div>
+    `;
+
+    notificationsEl.appendChild(notification);
+    requestAnimationFrame(() => notification.classList.add('visible'));
+
     setTimeout(() => {
-      notificationsEl.classList.remove('show');
-      setTimeout(() => notificationsEl.remove(), 300);
+      notification.classList.add('exiting');
+      setTimeout(() => notification.remove(), 300);
     }, 3000);
   }
 
@@ -379,32 +393,22 @@ class UIController {
     });
   }
 
-  showFastSeekAnimation(direction, position) {
-    const container = document.createElement('div');
-    container.className = `fastseek-indicator ${direction}`;
+  showFastSeekAnimation(direction) {
+    const messages = {
+      left: '⏪ Rewound 15s',
+      right: '⏩ Fast-forwarded 15s',
+      play: '▶️ Play',
+      pause: '⏸ Paused'
+    };
     
-    // Use same SVG structure as play/pause
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', direction === 'right' ? 
-      'M8 5v14l11-7z' :  // Right arrow (play icon)
-      'M6 19h4V5H6v14zm8-14v14h4V5h-4z'); // Left arrow (pause-like icon)
+    this.showNotification(messages[direction], 'info');
     
-    svg.appendChild(path);
-    container.appendChild(svg);
-    document.body.appendChild(container);
+    // Keep existing visual animation if needed, but remove duplicate feedback
+    // ... rest of existing animation code ...
+  }
 
-    // Center positioning like play/pause
-    container.style.left = '50%';
-    container.style.top = '50%';
-    container.style.transform = 'translate(-50%, -50%)';
-
-    // Use same animation class
-    container.classList.add('visible');
-    setTimeout(() => {
-      container.remove();
-    }, 600);
+  secsSeek(seconds) {
+    this.video.currentTime = Math.min(Math.max(0, this.video.currentTime + seconds), this.video.duration);
   }
 }
 
