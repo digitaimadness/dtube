@@ -239,7 +239,7 @@ async function loadNextVideo(retries = 0) {
       currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
       const cid = videoSources[currentVideoIndex];
       video.src = preloadedNextUrl;
-      console.log('Loaded preloaded video URL:', preloadedNextUrl);
+      console.log('Loaded preloaded video CID:', cid);
       
       // Warm up the buffer
       video.preload = "auto";
@@ -256,7 +256,7 @@ async function loadNextVideo(retries = 0) {
       const url = await loadVideoFromCid(cid);
       
       video.src = url;
-      console.log('Loaded video URL:', url);
+      console.log('Loaded video CID:', cid);
       
       // Wait for enough data to play
       await new Promise((resolve) => {
@@ -340,7 +340,7 @@ async function loadPreviousVideo() {
 
     const url = await loadVideoFromCid(cid);
     video.src = url;
-    console.log("Loaded video URL:", url);
+    console.log("Loaded video CID:", cid);
     video.load();
 
     try {
@@ -1196,7 +1196,9 @@ class UIController {
     if (isRecovering) return;
     isRecovering = true;
     
-    const bufferTimeout = 5000; // Reduced from 10s
+    const currentTime = video.currentTime;
+    const currentCid = videoSources[currentVideoIndex];
+    const bufferTimeout = 1000; // Reduced to 1 second
     const recoveryAbortController = new AbortController();
     
     try {
@@ -1211,8 +1213,38 @@ class UIController {
       ]);
     } catch (error) {
       if (!recoveryAbortController.signal.aborted) {
-        console.log('Attempting buffer recovery...');
-        await loadNextVideo();
+        console.log('Attempting buffer recovery for current video...');
+        
+        // Reset provider index for this CID
+        providerIndices.set(currentCid, 0);
+
+        // Get new URL from different provider
+        const newUrl = generateProviderUrl(currentCid, 
+          JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
+        );
+        
+        // Preserve playback state
+        video.src = newUrl;
+        video.currentTime = currentTime;
+        
+        // Wait for enough data to resume
+        await new Promise((resolve) => {
+          video.addEventListener('canplaythrough', resolve, { once: true });
+        });
+        
+        // Attempt playback with 3 retries
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await video.play();
+            break;
+          } catch (error) {
+            if (attempt === 2) {
+              console.log('Final recovery attempt failed, switching video');
+              loadNextVideo();
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
     } finally {
       isRecovering = false;
