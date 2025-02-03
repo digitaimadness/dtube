@@ -449,22 +449,24 @@ video::-webkit-media-controls-fullscreen-button {
 /* Notification System */
 .notifications-container {
   position: fixed;
-  bottom: 20px;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
+  align-items: center;
   gap: 12px;
   z-index: 1000;
   pointer-events: none;
   max-width: 90vw;
+  width: max-content;
 }
 
 .notification {
   background: rgba(20, 20, 20, 0.95);
   color: white;
   padding: 16px 24px;
-  border-radius: 12px;
+  border-radius: 0 0 12px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -472,8 +474,10 @@ video::-webkit-media-controls-fullscreen-button {
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   opacity: 0;
-  transform: translateY(20px);
-  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateY(-100%);
+  transition: 
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   pointer-events: auto;
   max-width: 400px;
 }
@@ -485,7 +489,7 @@ video::-webkit-media-controls-fullscreen-button {
 
 .notification.exiting {
   opacity: 0;
-  transform: translateY(-20px) scale(0.95);
+  transform: translateY(-100%) scale(0.95);
 }
 
 .notification-icon {
@@ -547,4 +551,18 @@ video::-webkit-media-controls-fullscreen-button {
 .notification-icon.error {
   background: #F44336;
   -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>');
+}
+
+/* Add scoping class to all UI-related styles */
+.ui-component {
+  /* All existing styles */
+}
+
+/* Example update */
+.ui-component .progress-container {
+  /* existing progress container styles */
+}
+
+.ui-component .notification {
+  /* notification styles */
 }

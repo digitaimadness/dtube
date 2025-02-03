@@ -5,6 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DaokoTube</title>
     <link rel="stylesheet" href="styles.css" />
+    <style>
+      .notifications {
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%) translateY(-100%);
+        transition: all 0.3s ease;
+        z-index: 1000;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        border-radius: 0 0 4px 4px;
+      }
+
+      .notifications.show {
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(-50%) translateY(-100%);
+        }
+        to {
+          transform: translateX(-50%) translateY(0);
+        }
+      }
+    </style>
   </head>
   <body>
     <main class="container">

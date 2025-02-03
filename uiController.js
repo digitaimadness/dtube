@@ -288,6 +288,20 @@ class UIController {
       setTimeout(() => { popup.style.display = 'none'; }, 300);
     }, 1000);
   }
+
+  showNotification(message, type = 'info') {
+    const notificationsEl = document.querySelector('.notifications');
+    if (!notificationsEl) return;
+    
+    notificationsEl.textContent = message;
+    notificationsEl.className = `notifications ${type}`;
+    notificationsEl.classList.add('show');
+    
+    setTimeout(() => {
+      notificationsEl.classList.remove('show');
+      setTimeout(() => notificationsEl.remove(), 300);
+    }, 3000);
+  }
 }
 
 export default UIController; 

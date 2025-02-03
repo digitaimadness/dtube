@@ -154,14 +154,11 @@ class VideoController {
         if (this.preloadedVideoUrl) {
           this.currentVideoIndex = (this.currentVideoIndex + 1) % this.videoSources.length;
           await this.loadVideo(Promise.resolve(this.preloadedVideoUrl));
-          console.log('Loaded preloaded video URL:', this.preloadedVideoUrl);
           this.preloadedVideoUrl = null;
         } else {
           this.currentVideoIndex = (this.currentVideoIndex + 1) % this.videoSources.length;
           const cid = this.videoSources[this.currentVideoIndex];
-          console.log('Attempting to load video with CID:', cid);
           const url = await loadVideoFromCid(cid);
-          console.log('Loaded video URL:', url);
           await this.loadVideo(Promise.resolve(url));
         }
       } else {
@@ -169,23 +166,17 @@ class VideoController {
         this.preloadedVideoUrl = null;
         this.currentVideoIndex = (this.currentVideoIndex - 1 + this.videoSources.length) % this.videoSources.length;
         const cid = this.videoSources[this.currentVideoIndex];
-        console.log('Attempting to load previous video with CID:', cid);
         const url = await loadVideoFromCid(cid);
-        console.log('Loaded video URL:', url);
         await this.loadVideo(Promise.resolve(url));
       }
 
       // Attempt playback with muted fallback
       try {
-        this.video.muted = true;
         await this.video.play();
-        this.video.muted = false;
-        // Optionally, trigger preloading of the next video here if a preloadNextVideo method exists
-        if (direction > 0 && typeof this.preloadNextVideo === 'function') {
+        if (typeof this.preloadNextVideo === 'function') {
           this.preloadNextVideo();
         }
       } catch (error) {
-        console.error('Autoplay blocked', error);
         if (this.onAutoplayBlocked) this.onAutoplayBlocked();
       }
     } catch (error) {

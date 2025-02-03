@@ -30,10 +30,6 @@ let isPreloadingNext = false;
 let bufferingUpdateScheduled = false;
 let isBuffering = false;
 
-// Cache references to spinner and progress bar elements
-const spinner = document.getElementById("spinner");
-const progressFilledElem = document.querySelector('.progress-bar');
-
 // Add these constants with other global constants
 const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
 
@@ -468,6 +464,17 @@ class UIController {
     this.fullscreenUIHidden = false;
     this.lastBufferUpdate = 0;
     this.lastProgressUpdate = 0;
+
+    // Add these DOM references
+    this.notificationContainer = document.getElementById('notifications-container');
+    this.interactionZones = document.getElementById('interactionZones');
+    
+    // Add these state properties
+    this.currentHue = 0;
+    this.bufferingState = {
+      isBuffering: false,
+      timeoutId: null
+    };
   }
 
   initializeUI() {
@@ -653,13 +660,13 @@ class UIController {
       notification.classList.add('visible');
     });
 
-    // Auto-dismiss after duration
+    // Auto-dismiss
     setTimeout(() => {
       notification.classList.add('exiting');
       setTimeout(() => notification.remove(), 300);
     }, duration);
 
-    // Manual dismiss on click
+    // Manual dismiss
     notification.addEventListener('click', () => {
       notification.classList.add('exiting');
       setTimeout(() => notification.remove(), 300);
@@ -1019,42 +1026,66 @@ class UIController {
   }
 
   handleBufferingStart() {
-    if (!this.state.isBuffering) {
-      this.state.isBuffering = true;
+    if (!this.bufferingState.isBuffering) {
+      this.bufferingState.isBuffering = true;
+      this.updateSpinner();
+      
+      this.bufferingState.timeoutId = setTimeout(async () => {
+        if (this.bufferingState.isBuffering) {
+          await this.handleBufferTimeout();
+        }
+      }, 2000);
+    }
+  }
+
+  async handleBufferTimeout() {
+    try {
+      const currentCid = videoSources[currentVideoIndex];
+      const url = await loadVideoFromCid(currentCid);
+      this.video.src = url;
+      await this.video.play();
+      this.showNotification(`Switched to ${getProviderFromUrl(url)}`, 'info', 2000);
+    } catch (error) {
+      console.error('Buffer recovery failed:', error);
+      loadNextVideo();
+    } finally {
+      this.bufferingState.isBuffering = false;
       this.updateSpinner();
     }
-    
-    if (this.state.bufferingTimeout) clearTimeout(this.state.bufferingTimeout);
-    
-    this.state.bufferingTimeout = setTimeout(async () => {
-      if (this.state.isBuffering) {
-        const currentCid = videoSources[currentVideoIndex];
-        try {
-          const url = await loadVideoFromCid(currentCid);
-          video.src = url;
-          await video.play();
-          const provider = getProviderFromUrl(url);
-          this.showNotification(`Switched to ${providerDisplayNames[provider]}`, 'info', 2000);
-        } catch (error) {
-          console.error('All providers failed, skipping video', error);
-          currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
-          loadNextVideo();
-        }
-        this.state.isBuffering = false;
-        this.updateSpinner();
-      }
-    }, 2000);
   }
 
   handleBufferingEnd() {
-    if (this.state.isBuffering) {
-      this.state.isBuffering = false;
+    if (this.bufferingState.isBuffering) {
+      this.bufferingState.isBuffering = false;
+      clearTimeout(this.bufferingState.timeoutId);
       this.updateSpinner();
     }
-    if (this.state.bufferingTimeout) {
-      clearTimeout(this.state.bufferingTimeout);
-      this.state.bufferingTimeout = null;
+  }
+
+  updateAllVisuals() {
+    if (this.video.paused) return;
+    
+    const now = Date.now();
+    this.updateProgress();
+    this.updateTimestamp();
+    
+    if (now - this.lastHueUpdate >= 200) {
+      this.updateColorScheme();
+      this.lastHueUpdate = now;
     }
+  }
+
+  updateColorScheme() {
+    this.frameAnalyzer.getDominantHue(this.video).then(hue => {
+      this.currentHue = hue;
+      this.updateProgressBarColor(hue);
+    });
+  }
+
+  // Move zone handling into UIController
+  initZoneInteractions() {
+    this.zoneHandler = new ZoneInteractionHandler(this);
+    this.zoneHandler.initialize();
   }
 }
 
