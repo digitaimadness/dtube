@@ -112,23 +112,34 @@ async function testProvider(url) {
     const cleanup = () => {
       testVideo.remove();
       clearTimeout(timeout);
+      resolved = true;
     };
+
+    const fastTimeout = 1500;
+    const fullTimeout = 3000;
 
     const timeout = setTimeout(() => {
       if (!resolved) {
-        resolved = true;
         cleanup();
         reject(new Error('Timeout'));
       }
-    }, 3000); // Increased timeout to 3 seconds
+    }, fastTimeout);
 
     const verifyPlayable = async () => {
       try {
         await testVideo.play();
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for 500ms of playback
+        clearTimeout(timeout);
+        setTimeout(() => {
+          cleanup();
+          reject(new Error('Timeout'));
+        }, fullTimeout);
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
         testVideo.pause();
+        cleanup();
         resolve(url);
       } catch (error) {
+        cleanup();
         reject(new Error('Playback test failed'));
       }
     };
@@ -150,7 +161,6 @@ async function testProvider(url) {
     }, { once: true });
     testVideo.addEventListener('error', () => {
       if (!resolved) {
-        resolved = true;
         cleanup();
         reject(new Error('Error loading video'));
       }
@@ -293,9 +303,16 @@ async function loadNextVideo(retries = 0) {
       video.src = url;
       console.log('Loaded video CID:', cid);
       
-      // Wait for enough data to play
+      // Replace canplaythrough with canplay for faster start
       await new Promise((resolve) => {
-        video.addEventListener('canplaythrough', resolve, { once: true });
+        const handleCanPlay = () => {
+          video.removeEventListener('canplay', handleCanPlay);
+          resolve();
+        };
+        video.addEventListener('canplay', handleCanPlay);
+        
+        // Fallback timeout
+        setTimeout(resolve, 1000);
       });
     }
 
@@ -1847,4 +1864,33 @@ async function fetchCidMetadata(url) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// Add PriorityQueue implementation
+class PriorityQueue {
+  constructor(comparator = (a, b) => a - b) {
+    this.heap = [];
+    this.comparator = comparator;
+  }
+
+  enqueue(value) {
+    this.heap.push(value);
+    this.bubbleUp();
+  }
+
+  dequeue() {
+    const root = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      this.sinkDown();
+    }
+    return root;
+  }
+
+  size() {
+    return this.heap.length;
+  }
+
+  // ... heap helper methods ...
 }
