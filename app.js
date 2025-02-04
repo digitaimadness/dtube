@@ -1,6 +1,11 @@
+import { AppState } from './state/stateManager.js';
+import { ProviderService } from './services/providerService.js';
+import { CACHE_KEYS, TIMING, DIMENSIONS } from './config/constants.js';
+import { shuffleArray, domHelpers } from './utils/helpers.js';
+
 // --- Global Constants and Variables --- //
 const VIDEO_CACHE_KEY = 'videoCache';
-const providerIndices = new Map(); // Tracks current provider index per CID
+const providerIndices = AppState.providerIndices; // Tracks current provider index per CID
 
 const video = document.getElementById("videoPlayer");
 // Set CORS attribute for cross-origin video frame sampling
@@ -16,7 +21,7 @@ offscreenCanvas.height = samplingHeight;
 
 // Global variables for video loading and buffering state
 let isLoading = false;
-let currentVideoIndex = -1;
+let currentVideoIndex = AppState.currentVideoIndex;
 let preloadedNextUrl = null;
 let isPreloadingNext = false;
 let bufferingUpdateScheduled = false;
@@ -27,7 +32,7 @@ let isRecovering = false; // Add to top with other globals
 const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
 
 // Replace the JSON import with fetch
-let videoSources = [];
+let videoSources = AppState.videoSources;
 
 // Add global declaration at the top with other globals
 let controlsSystem;  // Add this line with other global variables
@@ -55,11 +60,11 @@ const providers = Object.keys(PROVIDERS).map(providerKey => ({
 }));
 
 // Initialize VideoController (~line 44)
-const videoController = new VideoController(video, providers);
+const videoController = new VideoController(video, AppState.providers);
 
 // Add this constant near other cache constants
-const CID_VALID_CACHE_KEY = 'validCidCache';
-const CID_VALIDITY_DURATION = 48 * 60 * 60 * 1000; // 48 hours
+const CID_VALID_CACHE_KEY = CACHE_KEYS.CID_VALIDITY;
+const CID_VALIDITY_DURATION = TIMING.CID_VALIDITY_DURATION;
 
 // Add this error class near the top with other constants
 class CidValidationError extends Error {
@@ -73,17 +78,6 @@ class CidValidationError extends Error {
 let isSeeking = false;
 
 // --- Helper Functions --- //
-
-/**
- * Shuffles an array in place and returns it.
- */
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
 
 /* Insert new helper function testProvider before loadVideoFromCid */
 async function testProvider(url, signal) {
@@ -189,7 +183,7 @@ async function validateCidThroughProviders(cid) {
   
   // Add provider availability check
   const availableProviders = shuffledProviders.filter(providerKey => {
-    const stats = videoController.providerStats.get(providers.find(p => p.key === providerKey));
+    const stats = AppState.providerStats.get(providers.find(p => p.key === providerKey));
     return (stats?.errorCount || 0) < 3;
   });
 
@@ -263,7 +257,7 @@ async function validateCidThroughProviders(cid) {
     console.error(`All providers failed for CID ${cid}:`, error);
     // Mark failed providers
     providersWithDNS.forEach(provider => {
-      const stats = videoController.providerStats.get(providers.find(p => p.key === provider));
+      const stats = AppState.providerStats.get(providers.find(p => p.key === provider));
       stats.errorCount = (stats.errorCount || 0) + 1;
     });
     throw new CidValidationError(cid);
@@ -272,79 +266,46 @@ async function validateCidThroughProviders(cid) {
 
 /* Modified loadVideoFromCid with metadata validation */
 async function loadVideoFromCid(cid) {
-  // Check cached validity first
-  const validCids = JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY) || '{}');
-  
-  if (validCids[cid] && Date.now() < validCids[cid].expires) {
-    try {
-      const cachedUrl = generateProviderUrl(cid, validCids[cid].lastWorkingProvider);
-      const metadata = await fetchCidMetadata(cachedUrl);
-      
-      if (metadata.valid && metadata.contentType?.startsWith('video/')) {
-        console.log(`Using validated CID from cache: ${cid}`);
-        return cachedUrl;
-      }
-    } catch (error) {
-      console.log(`Cached provider failed validation, revalidating CID: ${cid}`);
-    }
-  }
-
   try {
     const url = await validateCidThroughProviders(cid);
-    const metadata = await fetchCidMetadata(url);
-    
-    if (!metadata.contentType?.startsWith('video/')) {
-      throw new Error(`Invalid content type: ${metadata.contentType}`);
-    }
-
-    // Update cache with working provider
-    const urlObj = new URL(url);
-    const isSubdomainFormat = urlObj.hostname.includes('.ipfs.');
-    const providerKey = isSubdomainFormat 
-      ? urlObj.hostname.split('.').slice(-2).join('.')
-      : urlObj.hostname;
-
-    validCids[cid] = {
-      expires: Date.now() + CID_VALIDITY_DURATION,
-      lastWorkingProvider: providerKey
-    };
-    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
-    
+    AppState.currentVideoIndex = (AppState.currentVideoIndex + 1) % AppState.videoSources.length;
     return url;
   } catch (error) {
-    console.error(`CID validation failed for ${cid}:`, error);
-    
-    // Add temporary failure tracking
-    const validCids = JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY) || '{}');
-    validCids[cid] = validCids[cid] || { failures: 0 };
-    validCids[cid].failures++;
-    
-    // Only remove after 3 consecutive failures
-    if (validCids[cid].failures >= 3) {
-      delete validCids[cid];
-      console.log(`Permanently removed invalid CID: ${cid}`);
-    }
-    
-    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
-    throw new CidValidationError(cid);
+    handleLoadError(error, cid);
+    throw error;
   }
 }
 
 // Add this helper function
 function generateProviderUrl(cid, preferredProvider) {
-  const providerOrder = [...Object.keys(PROVIDERS)].filter(p => {
-    const provider = PROVIDERS[p];
-    return !provider.template.includes('ipfs.ipfs'); // Filter out invalid templates
-  });
-  
-  if (preferredProvider) {
-    providerOrder.unshift(...providerOrder.splice(providerOrder.indexOf(preferredProvider), 1));
+  const providerOrder = AppState.providers
+    .filter(p => {
+      try {
+        const url = getProviderUrl(p.key, cid);
+        new URL(url); // Validate URL format
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .map(p => p.key);
+
+  if (preferredProvider && providerOrder.includes(preferredProvider)) {
+    providerOrder.unshift(preferredProvider);
   }
-  
-  const providerIndex = providerIndices.get(cid) || 0;
+
+  if (providerOrder.length === 0) {
+    throw new Error('No valid providers available');
+  }
+
+  const providerIndex = AppState.providerIndices.get(cid) || 0;
   const providerKey = providerOrder[providerIndex % providerOrder.length];
-  providerIndices.set(cid, providerIndex + 1);
   
+  if (!providerKey || !PROVIDERS[providerKey]) {
+    throw new Error(`Invalid provider key: ${providerKey}`);
+  }
+
+  AppState.providerIndices.set(cid, providerIndex + 1);
   return getProviderUrl(providerKey, cid);
 }
 
@@ -421,6 +382,11 @@ async function loadNextVideo(retries = 0) {
       video.muted = true;
       const playPromise = video.play();
       
+      // Add source validation check
+      if (!video.src || video.error) {
+        throw new DOMException('Invalid video source', 'NotSupportedError');
+      }
+
       await Promise.race([
         playPromise,
         new Promise((_, reject) => {
@@ -434,14 +400,15 @@ async function loadNextVideo(retries = 0) {
       video.muted = false;
       preloadNextVideo();
     } catch (error) {
-      if (error.name !== 'AbortError') {
+      if (error.name === 'NotAllowedError') {
+        controlsSystem.showNotification("Click anywhere to unmute audio", 'warning');
+      } else if (error.name === 'NotSupportedError') {
+        console.error('Invalid video source, skipping...');
+        videoSources.splice(currentVideoIndex, 1);
+        return loadNextVideo(retries);
+      } else {
         console.error('Autoplay blocked', error);
-        // Show specific notification for unmute failure
-        if (error.name === 'NotAllowedError') {
-          controlsSystem.showNotification("Click anywhere to unmute audio", 'warning');
-        } else {
-          controlsSystem.showNotification("Playback blocked - click to start", 'warning');
-        }
+        controlsSystem.showNotification("Playback blocked - click to start", 'warning');
       }
     }
   } catch (error) {
@@ -452,7 +419,6 @@ async function loadNextVideo(retries = 0) {
       const invalidIndex = videoSources.indexOf(error.cid);
       if (invalidIndex > -1) {
         videoSources.splice(invalidIndex, 1);
-        // Adjust current index if needed
         if (currentVideoIndex >= invalidIndex) {
           currentVideoIndex = Math.max(0, currentVideoIndex - 1);
         }
@@ -461,6 +427,10 @@ async function loadNextVideo(retries = 0) {
       if (videoSources.length > 0) {
         return loadNextVideo(0);
       }
+    } else if (error.name === 'NotSupportedError') {
+      console.error('Invalid video source URL');
+      videoSources.splice(currentVideoIndex, 1);
+      return loadNextVideo(retries);
     }
 
     // Enhanced retry logic with exponential backoff
@@ -1374,21 +1344,6 @@ class UIController {
           await new Promise((resolve) => {
             video.addEventListener('canplaythrough', resolve, { once: true });
           });
-          
-          // Attempt playback with 3 retries
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              await video.play();
-              console.log(`Buffer recovery succeeded using ${fastestProvider}`);
-              break;
-            } catch (error) {
-              if (attempt === 2) {
-                console.log('Final recovery attempt failed, switching video');
-                loadNextVideo();
-              }
-            }
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
         }
       });
     } finally {
@@ -2043,4 +1998,29 @@ async function handleBufferRecovery() {
     isRecovering = false;
     recoveryAbortController.abort();
   }
+}
+
+function updateGlobalStyles() {
+  document.documentElement.style.setProperty(
+    '--hue', 
+    AppState.currentHue
+  );
+}
+
+/* Add this error handling function near other helper functions */
+function handleLoadError(error, cid) {
+  console.error(`CID validation failed for ${cid}:`, error);
+  
+  // Remove invalid CID from sources
+  const invalidIndex = AppState.videoSources.indexOf(cid);
+  if (invalidIndex > -1) {
+    AppState.videoSources.splice(invalidIndex, 1);
+  }
+
+  // Update cache
+  const validCids = JSON.parse(localStorage.getItem(CACHE_KEYS.CID_VALIDITY) || '{}');
+  delete validCids[cid];
+  localStorage.setItem(CACHE_KEYS.CID_VALIDITY, JSON.stringify(validCids));
+
+  throw new CidValidationError(cid);
 }

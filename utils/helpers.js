@@ -29,4 +29,28 @@ export function throttle(func, limit) {
       }, remaining);
     }
   };
-} 
+}
+
+export const domHelpers = {
+  createVideoElement: () => {
+    const video = document.createElement('video');
+    video.crossOrigin = "anonymous";
+    video.controls = false;
+    return video;
+  },
+  
+  setupDNSPrefetch: (hostname) => {
+    const dnsPrefetch = document.createElement('link');
+    dnsPrefetch.rel = 'dns-prefetch';
+    dnsPrefetch.href = `//${hostname}`;
+    document.head.appendChild(dnsPrefetch);
+  }
+};
+
+export const stateHelpers = {
+  updateProviderStats: (providerKey, updateFn) => {
+    const provider = AppState.providers.find(p => p.key === providerKey);
+    const stats = AppState.providerStats.get(provider);
+    AppState.providerStats.set(provider, updateFn(stats));
+  }
+}; 
