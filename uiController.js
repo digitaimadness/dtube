@@ -297,26 +297,8 @@ class UIController {
     }
   }
 
-  showNotification(message, type = 'info') {
-    const notificationsEl = document.getElementById('notifications-container');
-    if (!notificationsEl) return;
-
-    const notification = document.createElement('div');
-    notification.className = `notification ${type}`;
-    notification.innerHTML = `
-      <div class="notification-content">
-        <div class="notification-message">${message}</div>
-        <div class="notification-timestamp">${new Date().toLocaleTimeString()}</div>
-      </div>
-    `;
-
-    notificationsEl.appendChild(notification);
-    requestAnimationFrame(() => notification.classList.add('visible'));
-
-    setTimeout(() => {
-      notification.classList.add('exiting');
-      setTimeout(() => notification.remove(), 300);
-    }, 3000);
+  showNotification(message, type = 'info', duration = 3000) {
+    this.notificationSystem.show(message, type, duration);
   }
 
   updateTimestampPopupPreview(offsetX) {
@@ -437,6 +419,11 @@ class UIController {
       this.updateColorScheme();
       this.lastHueUpdate = Date.now();
     }
+  }
+
+  updateProgress() {
+    const progress = (this.video.currentTime / this.video.duration) * 100;
+    this.controls.progressBar.style.width = `${progress}%`;
   }
 }
 

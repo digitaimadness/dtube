@@ -13,9 +13,9 @@ export const stateHelpers = {
   
   updateProviderStats(providerKey, updateFn) {
     const provider = AppState.providers.find(p => p.key === providerKey);
-    if (provider) {
-      const stats = AppState.providerStats.get(provider) || {};
-      AppState.providerStats.set(provider, updateFn(stats));
-    }
+    if (!provider) return;
+
+    const currentStats = AppState.providerStats.get(provider) || {};
+    AppState.providerStats.set(provider, updateFn(currentStats));
   }
 }; 

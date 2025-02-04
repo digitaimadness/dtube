@@ -51,9 +51,7 @@ export const domHelpers = {
     if (subdomainMatch) return subdomainMatch[2];
     
     const pathMatch = url.match(/https?:\/\/ipfs\.([^\/]+)\/ipfs\/.+$/);
-    if (pathMatch) return pathMatch[1];
-    
-    return 'unknown';
+    return pathMatch?.[1] || 'unknown';
   }
 };
 
@@ -63,4 +61,18 @@ export const stateHelpers = {
     const stats = AppState.providerStats.get(provider);
     AppState.providerStats.set(provider, updateFn(stats));
   }
-}; 
+};
+
+export async function withRetry(fn, options = {}) {
+  const { maxRetries = 3, delay = 1000 } = options;
+  let attempt = 0;
+  
+  while (attempt < maxRetries) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt++ >= maxRetries) throw error;
+      await new Promise(r => setTimeout(r, delay * (2 ** attempt)));
+    }
+  }
+} 

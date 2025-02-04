@@ -184,14 +184,30 @@ async function testProvider(url, signal) {
   });
 }
 
+// Extract common validation logic
+async function validateCidCommon(cid, isPreload = false) {
+  const providerKeys = Object.keys(PROVIDERS);
+  const shuffledProviders = shuffleArray([...providerKeys]);
+  
+  // Shared DNS check logic
+  const dnsResults = await Promise.all(shuffledProviders.map(async (provider) => {
+    const url = new URL(getProviderUrl(provider, cid));
+    return checkDNSResolution(url.hostname);
+  }));
+
+  // Shared provider filtering
+  return shuffledProviders.filter((_, index) => dnsResults[index]);
+}
+
 // Modified validateCidThroughProviders
 async function validateCidThroughProviders(cid) {
   const providerKeys = Object.keys(PROVIDERS);
   const shuffledProviders = shuffleArray([...providerKeys]);
   
-  // Add provider availability check
+  // Add null-safe provider availability check
   const availableProviders = shuffledProviders.filter(providerKey => {
-    const stats = AppState.providerStats.get(providers.find(p => p.key === providerKey));
+    const provider = providers.find(p => p.key === providerKey);
+    const stats = provider ? AppState.providerStats.get(provider) : null;
     return (stats?.errorCount || 0) < 3;
   });
 
@@ -267,10 +283,11 @@ async function validateCidThroughProviders(cid) {
     return await Promise.any(providerPromises);
   } catch (error) {
     console.error(`All providers failed for CID ${cid}:`, error);
-    // Mark failed providers
-    providersWithDNS.forEach(provider => {
-      const stats = AppState.providerStats.get(providers.find(p => p.key === provider));
-      stats.errorCount = (stats.errorCount || 0) + 1;
+    // Safe provider stats update using stateHelpers
+    providersWithDNS.forEach(providerKey => {
+      stateHelpers.updateProviderStats(providerKey, stats => ({
+        errorCount: (stats?.errorCount || 0) + 1
+      }));
     });
     throw new CidValidationError(cid);
   }
@@ -1513,18 +1530,8 @@ async function main() {
   });
 
   try {
-    // Move video source loading into main execution flow
-    const response = await fetch('./videoSources.json');
-    if (!response.ok) throw new Error('Network response was not ok');
-    
-    videoSources = shuffleArray(await response.json());
-    
-    if (videoSources.length > 0) {
-      await loadNextVideo();
-    } else {
-      console.error('No valid video sources available');
-      controlsSystem.showNotification("No videos available", 'error');
-    }
+    // Consolidate video source loading into a single function
+    await initializeVideoSources();
   } catch (error) {
     console.error('Error loading video sources:', error);
     // Add fallback CIDs
@@ -1891,31 +1898,19 @@ video.addEventListener("waiting", () => {
 });
 
 // Add this near the top with other initializations
-fetch('./videoSources.json')
-  .then(response => {
-    if (!response.ok) throw new Error('Network response was not ok');
-    return response.json();
-  })
-  .then(data => {
-    videoSources = shuffleArray(data);
-  })
-  .catch(error => {
+async function initializeVideoSources() {
+  try {
+    const response = await fetch('./videoSources.json');
+    videoSources = shuffleArray(await response.json());
+  } catch (error) {
     console.error('Error loading video sources:', error);
-    // Add fallback CIDs
-    videoSources = shuffleArray([
-      'bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu',
-      'bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq',
-      'bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e'
-    ]);
-  })
-  .finally(() => {
-    if (videoSources.length > 0) {
-      loadNextVideo();
-    } else {
-      console.error('No valid video sources available');
-      controlsSystem.showNotification("No videos available", 'error');
-    }
-  });
+    videoSources = shuffleArray([/* fallback CIDs */]);
+  }
+  
+  if (videoSources.length > 0) {
+    loadNextVideo();
+  }
+}
 
 // Add this near other helper functions
 async function fetchCidMetadata(url) {
