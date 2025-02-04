@@ -3,6 +3,8 @@
  * This module provides centralized video control with queued commands for seeks, source loading, playback, and error handling.
  */
 
+import { PriorityQueue } from './utils/PriorityQueue.js';
+
 class VideoController {
   constructor(videoElement, providers) {
     this.video = videoElement;
