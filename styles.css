@@ -7,10 +7,7 @@
   --border-color: rgba(255, 255, 255, 0.1);
   --progress-track: rgba(50, 50, 50, 0.5);
   --spinner-border: rgba(255, 255, 255, 0.3);
-  --main-hue: 0; /* Centralized hue variable */
-  --primary-color: hsl(var(--main-hue), 100%, 50%);
-  --secondary-color: hsl(var(--main-hue), 80%, 60%);
-  --hue: 0;
+  --hue: 0; /* This should be the single source of truth */
   --primary: hsl(var(--hue), 70%, 50%);
   --primary-transparent: hsla(var(--hue), 70%, 50%, 0.2);
   --secondary: hsl(var(--hue), 70%, 95%);
@@ -525,7 +522,7 @@ body {
 /* Update timestamp popup styles */
 .timestamp-popup.progress-indicator {
   background: rgba(0, 0, 0, 0.8) !important;
-  border: 1px solid hsla(var(--main-hue), 60%, 50%, 0.4);
+  border: 1px solid hsla(var(--hue), 60%, 50%, 0.4);
   color: white;
   backdrop-filter: blur(8px);
   padding: 8px 16px;

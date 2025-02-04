@@ -410,6 +410,34 @@ class UIController {
   secsSeek(seconds) {
     this.video.currentTime = Math.min(Math.max(0, this.video.currentTime + seconds), this.video.duration);
   }
+
+  updateControlsVisibility() {
+    if (this.controlsTimeout) clearTimeout(this.controlsTimeout);
+    
+    // Show controls and set timeout for hiding
+    this.controlsVisible = true;
+    this.ui.progressContainer.style.opacity = '1';
+    
+    // Set timeout to hide controls after 3 seconds
+    this.controlsTimeout = setTimeout(() => {
+      this.controlsVisible = false;
+      this.ui.progressContainer.style.opacity = '0';
+    }, 3000);
+  }
+
+  updateAll() {
+    this.updateBufferBar(this.video);
+    this.updatePlaybackProgress(this.video);
+    
+    // Update controls visibility state
+    this.updateControlsVisibility();
+    
+    // Update color scheme if needed
+    if(Date.now() - this.lastHueUpdate > 250) {
+      this.updateColorScheme();
+      this.lastHueUpdate = Date.now();
+    }
+  }
 }
 
 export default UIController; 

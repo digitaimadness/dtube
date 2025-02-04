@@ -22,10 +22,10 @@ function rgbToHue(r, g, b) {
   let hue = 0;
   
   if (max !== min) {
-    if (max === r) hue = ((g - b) / (max - min)) * 60;
-    else if (max === g) hue = ((b - r) / (max - min)) * 60 + 120;
-    else hue = ((r - g) / (max - min)) * 60 + 240;
+    if (max === r) hue = ((g - b) / (max - min) * 60 + 360) % 360;
+    else if (max === g) hue = ((b - r) / (max - min) * 60 + 120) % 360;
+    else hue = ((r - g) / (max - min) * 60 + 240) % 360;
   }
   
-  return (hue + 360) % 360;
+  return hue;
 } 

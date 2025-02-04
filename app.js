@@ -208,8 +208,18 @@ async function validateCidThroughProviders(cid) {
   const providerKeys = Object.keys(providerDisplayNames);
   const shuffledProviders = shuffleArray([...providerKeys]);
   
+  // Add provider availability check
+  const availableProviders = shuffledProviders.filter(provider => {
+    const stats = videoController.providerStats.get(providers.find(p => p.key === provider));
+    return (stats?.errorCount || 0) < 3;
+  });
+
+  if (availableProviders.length === 0) {
+    throw new CidValidationError(cid);
+  }
+
   // Prefetch DNS for all providers
-  shuffledProviders.forEach(provider => {
+  availableProviders.forEach(provider => {
     const url = new URL(getProviderUrl(provider, cid));
     const dnsPrefetch = document.createElement('link');
     dnsPrefetch.rel = 'dns-prefetch';
@@ -218,7 +228,7 @@ async function validateCidThroughProviders(cid) {
   });
 
   // Add provider cycling with timeout
-  const providerPromises = shuffledProviders.map((provider, index) => {
+  const providerPromises = availableProviders.map((provider, index) => {
     const url = getProviderUrl(provider, cid);
     const timeout = 5000 + (index * 1000); // Staggered timeouts
     
@@ -250,6 +260,11 @@ async function validateCidThroughProviders(cid) {
     return await Promise.any(providerPromises);
   } catch (error) {
     console.error(`All providers failed for CID ${cid}:`, error);
+    // Mark failed providers
+    availableProviders.forEach(provider => {
+      const stats = videoController.providerStats.get(providers.find(p => p.key === provider));
+      stats.errorCount = (stats.errorCount || 0) + 1;
+    });
     throw new CidValidationError(cid);
   }
 }
@@ -337,6 +352,12 @@ async function loadNextVideo(retries = 0) {
     isLoading = true;
     controlsSystem.updateSpinner();
     
+    // Add provider reset logic
+    if (retries > 0) {
+      providerIndices.clear();
+      videoController.resetProviderStats();
+    }
+
     // Create new abort controller for each attempt
     if (videoController.currentLoadAbortController) {
       videoController.currentLoadAbortController.abort();
@@ -421,28 +442,28 @@ async function loadNextVideo(retries = 0) {
   } catch (error) {
     console.error('Error loading video:', error);
     
-    // Handle CID validation errors differently
     if (error instanceof CidValidationError) {
       console.log(`Skipping invalid CID: ${error.cid}`);
-      
-      // Remove invalid CID from video sources
       const invalidIndex = videoSources.indexOf(error.cid);
       if (invalidIndex > -1) {
         videoSources.splice(invalidIndex, 1);
+        // Adjust current index if needed
+        if (currentVideoIndex >= invalidIndex) {
+          currentVideoIndex = Math.max(0, currentVideoIndex - 1);
+        }
       }
       
-      // Immediately try next video without counting as retry
       if (videoSources.length > 0) {
-        currentVideoIndex = (currentVideoIndex + 1) % videoSources.length;
         return loadNextVideo(0);
       }
     }
 
-    // Regular error handling
-    const MAX_RETRIES = 3;
+    // Enhanced retry logic with exponential backoff
+    const MAX_RETRIES = 5;
     if (retries < MAX_RETRIES && !(error instanceof CidValidationError)) {
-      console.log(`Retrying (${retries + 1}/${MAX_RETRIES})...`);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)));
+      const delay = Math.min(1000 * (2 ** retries), 10000);
+      console.log(`Retrying in ${delay}ms (${retries + 1}/${MAX_RETRIES})...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
       return loadNextVideo(retries + 1);
     }
     
@@ -704,6 +725,12 @@ class UIController {
     };
 
     this.playPauseAnimation = document.getElementById('playPauseAnimation');
+
+    // Add this event listener
+    video.addEventListener('loadedmetadata', () => {
+      this.frameAnalyzer = new FrameAnalyzer();
+      this.startHueUpdates();
+    });
   }
 
   initializeUI() {
@@ -1230,41 +1257,16 @@ class UIController {
   }
 
   updateAll() {
-    if (this.video.paused) return;
+    this.updateBufferBar(this.video);
+    this.updatePlaybackProgress(this.video);
     
-    const now = Date.now();
-    
-    // Throttle buffer updates to 10fps
-    if (now - this.lastBufferUpdate > 100) {
-      this.updateBufferBar(this.video);
-      this.lastBufferUpdate = now;
-    }
-    
-    // Throttle progress updates to 15fps
-    if (now - this.lastProgressUpdate > 66) {
-      this.updatePlaybackProgress(this.video);
-      this.lastProgressUpdate = now;
-    }
-
-    // Always update timestamp position if not dragging
-    if (this.video.duration > 0 && !this.state.isDragging) {
-      const percent = this.video.currentTime / this.video.duration;
-      const offsetX = percent * this.state.containerWidth;
-      this.updateTimestampPopupPreview(offsetX);
-    }
-
-    // Keep existing hue update throttling (200ms)
-    if (Date.now() - this.lastHueUpdate >= 200) {
-      if (!this.video.paused && this.video.readyState >= 2) {
-        this.frameAnalyzer.getDominantHue(this.video).then((hue) => {
-          this.currentHue = hue;
-          this.updateAllUIColor();
-        });
-      }
+    // Add this conditional hue update
+    if(Date.now() - this.lastHueUpdate > 250) { // Update 4x/sec
+      this.updateColorScheme();
       this.lastHueUpdate = Date.now();
     }
-
-    this.updateSpinner();
+    
+    this.updateControlsVisibility();
   }
 
   handlePopupDragStart(e) {
@@ -1449,6 +1451,29 @@ class UIController {
       container.remove();
     }, 500);
   }
+
+  startHueUpdates() {
+    const hueUpdate = () => {
+      if(!this.video.paused) {
+        this.updateColorScheme();
+        requestAnimationFrame(hueUpdate);
+      }
+    };
+    requestAnimationFrame(hueUpdate);
+  }
+
+  updateControlsVisibility() {
+    if (this.controlsVisible && !this.fullscreenUIHidden) {
+      this.showControls();
+    } else {
+      this.hideControls();
+    }
+    
+    // Additional visibility logic for fullscreen
+    if (document.fullscreenElement) {
+      this.controls.progressContainer.style.opacity = this.controlsVisible ? '1' : '0';
+    }
+  }
 }
 
 // --- Update registerVideoEventListeners ---
@@ -1518,25 +1543,30 @@ async function main() {
   try {
     // Move video source loading into main execution flow
     const response = await fetch('./videoSources.json');
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) throw new Error('Network response was not ok');
     
     videoSources = shuffleArray(await response.json());
     
     if (videoSources.length > 0) {
       await loadNextVideo();
     } else {
-      console.error("Video sources array is empty");
+      console.error('No valid video sources available');
       controlsSystem.showNotification("No videos available", 'error');
     }
   } catch (error) {
-    console.error("Initialization failed:", error);
-    controlsSystem.showNotification("Failed to load content", 'error');
-    
-    // Add fallback to hardcoded sources
-    const fallbackSources = await import('./config/fallbackSources.js');
-    if (fallbackSources?.length > 0) {
-      videoSources = shuffleArray(fallbackSources);
-      await loadNextVideo();
+    console.error('Error loading video sources:', error);
+    // Add fallback CIDs
+    videoSources = shuffleArray([
+      'bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu',
+      'bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq',
+      'bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e'
+    ]);
+  } finally {
+    if (videoSources.length > 0) {
+      loadNextVideo();
+    } else {
+      console.error('No valid video sources available');
+      controlsSystem.showNotification("No videos available", 'error');
     }
   }
 }
@@ -1848,16 +1878,29 @@ video.addEventListener("waiting", () => {
 
 // Add this near the top with other initializations
 fetch('./videoSources.json')
-  .then(response => response.json())
+  .then(response => {
+    if (!response.ok) throw new Error('Network response was not ok');
+    return response.json();
+  })
   .then(data => {
     videoSources = shuffleArray(data);
-    if (videoSources.length > 0) {
-      loadNextVideo(); // Start loading after sources are available
-    }
   })
   .catch(error => {
     console.error('Error loading video sources:', error);
-    showNotification("Failed to load video sources", 'error');
+    // Add fallback CIDs
+    videoSources = shuffleArray([
+      'bafybeic7y4a4334bvkj4qjzx7gjodlkca33kfycvr7esicm23efroidgfu',
+      'bafybeidcjv6gk54s77rnocd3evbxdm26p2cyolhihpqxp366oj2ztaeltq',
+      'bafybeicprruiaudtfmg4kg2zcr45776x5da77zv73owooppw3o2ctfdt5e'
+    ]);
+  })
+  .finally(() => {
+    if (videoSources.length > 0) {
+      loadNextVideo();
+    } else {
+      console.error('No valid video sources available');
+      controlsSystem.showNotification("No videos available", 'error');
+    }
   });
 
 // Add this near other helper functions
