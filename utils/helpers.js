@@ -44,6 +44,16 @@ export const domHelpers = {
     dnsPrefetch.rel = 'dns-prefetch';
     dnsPrefetch.href = `//${hostname}`;
     document.head.appendChild(dnsPrefetch);
+  },
+  
+  getProviderFromUrl(url) {
+    const subdomainMatch = url.match(/https?:\/\/(.+)\.ipfs\.([^\/]+)/);
+    if (subdomainMatch) return subdomainMatch[2];
+    
+    const pathMatch = url.match(/https?:\/\/ipfs\.([^\/]+)\/ipfs\/.+$/);
+    if (pathMatch) return pathMatch[1];
+    
+    return 'unknown';
   }
 };
 

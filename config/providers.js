@@ -35,13 +35,15 @@ export function getProviderUrl(providerKey, cid) {
     throw new Error(`Invalid CID format: ${cid}`);
   }
 
-  // Add DNS validation
+  // Use the provider's template directly
+  const url = provider.template.replace('{cid}', cid);
+
+  // Validate URL structure
   try {
-    new URL(provider.template.replace('{cid}', cid));
+    new URL(url);
+    return url;
   } catch (error) {
-    console.error(`Invalid URL template for ${providerKey}: ${error}`);
+    console.error(`Invalid URL for ${providerKey}: ${url}`);
     throw new Error(`Configuration error for ${providerKey}`);
   }
-
-  return provider.template.replace('{cid}', cid);
 } 

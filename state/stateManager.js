@@ -42,6 +42,7 @@ AppState.providerStats = new Map(
   AppState.providers.map(p => [p, {
     successCount: 0,
     errorCount: 0,
+    preloadSuccess: 0,
     avgSpeed: 0,
     lastUsed: 0,
     corsErrors: 0

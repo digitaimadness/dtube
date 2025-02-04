@@ -1,7 +1,9 @@
+import { PriorityQueue } from './utils/PriorityQueue.js';
 import { AppState } from './state/stateManager.js';
 import { ProviderService } from './services/providerService.js';
 import { CACHE_KEYS, TIMING, DIMENSIONS } from './config/constants.js';
 import { shuffleArray, domHelpers } from './utils/helpers.js';
+import { stateHelpers } from './state/stateHelpers.js';
 
 // --- Global Constants and Variables --- //
 const VIDEO_CACHE_KEY = 'videoCache';
@@ -76,6 +78,12 @@ class CidValidationError extends Error {
 
 // Add with other global variables (~line 32)
 let isSeeking = false;
+
+// Add near other global variables
+const PRELOAD_LOOKAHEAD = 3; // Number of videos ahead to preload
+const PRELOAD_CONCURRENCY = 2; // Max parallel preloads
+const preloadQueue = new PriorityQueue((a, b) => a.priority - b.priority);
+let activePreloads = new Set();
 
 // --- Helper Functions --- //
 
@@ -195,11 +203,15 @@ async function validateCidThroughProviders(cid) {
   const dnsCheckPromises = availableProviders.map(async (provider) => {
     const url = new URL(getProviderUrl(provider, cid));
     try {
-      await fetch(`https://dns.google/resolve?name=${url.hostname}`, { 
+      const dnsResponse = await fetch(`https://dns.google/resolve?name=${url.hostname}`, { 
         mode: 'cors',
         headers: { 'Accept': 'application/dns-json' }
       });
-      return true;
+      const dnsData = await dnsResponse.json();
+      
+      // Check if DNS response contains valid records
+      return dnsData.Status === 0 && 
+            (dnsData.Answer?.length > 0 || dnsData.Authority?.length > 0);
     } catch (error) {
       return false;
     }
@@ -1642,26 +1654,68 @@ function throttle(func, limit) {
   };
 }
 
-// Insert preloadNextVideo function after loadPreviousVideo function (or after loadNextVideo) near its definition
-async function preloadNextVideo() {
-  if (isPreloadingNext || videoSources.length === 0) return;
-  isPreloadingNext = true;
-
-  try {
-    const nextIndex = (currentVideoIndex + 1) % videoSources.length;
-    const cid = videoSources[nextIndex];
-    
-    // Validate CID before preloading
-    const url = await loadVideoFromCid(cid).catch(() => null);
-    if (url) {
-      const preloadVideo = document.createElement('video');
-      preloadVideo.src = url;
-      preloadVideo.preload = 'auto';
-      preloadedNextUrl = url;
-    }
-  } finally {
-    isPreloadingNext = false;
+// Replace existing preloadNextVideo implementation
+function preloadNextVideo() {
+  if (isPreloadingNext || activePreloads.size >= PRELOAD_CONCURRENCY) return;
+  
+  // Prioritize upcoming videos based on playback direction
+  const upcomingCids = [];
+  for (let i = 1; i <= PRELOAD_LOOKAHEAD; i++) {
+    const idx = (currentVideoIndex + i) % videoSources.length;
+    upcomingCids.push({
+      cid: videoSources[idx],
+      priority: i === 1 ? 1 : 2 // Highest priority for immediate next
+    });
   }
+
+  // Queue preloads with smart DNS prefetch
+  upcomingCids.forEach(({ cid, priority }) => {
+    if (!activePreloads.has(cid)) {
+      preloadQueue.enqueue({ cid, priority });
+      prefetchDnsForCid(cid);
+    }
+  });
+
+  processPreloadQueue();
+}
+
+async function processPreloadQueue() {
+  while (preloadQueue.size() > 0 && activePreloads.size < PRELOAD_CONCURRENCY) {
+    const { cid } = preloadQueue.dequeue();
+    isPreloadingNext = true;
+    activePreloads.add(cid);
+    
+    try {
+      const url = await validateCidThroughProviders(cid);
+      await videoController.preloadVideo(cid, url);
+      
+      // Update provider stats for successful preloads
+      const providerKey = getProviderFromUrl(url);
+      stateHelpers.updateProviderStats(providerKey, stats => ({
+        ...stats,
+        preloadSuccess: (stats.preloadSuccess || 0) + 1
+      }));
+      
+    } catch (error) {
+      console.error(`Preload failed for ${cid}:`, error);
+      // Properly handle invalid CID using state helpers
+      stateHelpers.markInvalidCid(cid);
+      if (error instanceof CidValidationError) {
+        videoSources = videoSources.filter(sourceCid => sourceCid !== cid);
+      }
+    } finally {
+      isPreloadingNext = false;
+      activePreloads.delete(cid);
+      processPreloadQueue();
+    }
+  }
+}
+
+function prefetchDnsForCid(cid) {
+  providers.forEach(provider => {
+    const url = new URL(getProviderUrl(provider.key, cid));
+    domHelpers.setupDNSPrefetch(url.hostname);
+  });
 }
 
 /* Modified initHueEffects function */
@@ -1741,8 +1795,8 @@ async function playAudio() {
   }
 }
 
-// Add this helper function near other utility functions
-function getProviderFromUrl(url) {
+// Update the getProviderFromUrl function to be a helper
+export function getProviderFromUrl(url) {
   const subdomainMatch = url.match(/https?:\/\/(.+)\.ipfs\.([^\/]+)/);
   if (subdomainMatch) return subdomainMatch[2];
   
@@ -1905,35 +1959,6 @@ async function fetchCidMetadata(url) {
   }
 }
 
-// Add PriorityQueue implementation
-class PriorityQueue {
-  constructor(comparator = (a, b) => a - b) {
-    this.heap = [];
-    this.comparator = comparator;
-  }
-
-  enqueue(value) {
-    this.heap.push(value);
-    this.bubbleUp();
-  }
-
-  dequeue() {
-    const root = this.heap[0];
-    const last = this.heap.pop();
-    if (this.heap.length > 0) {
-      this.heap[0] = last;
-      this.sinkDown();
-    }
-    return root;
-  }
-
-  size() {
-    return this.heap.length;
-  }
-
-  // ... heap helper methods ...
-}
-
 // Update the handleBufferRecovery function to be async
 async function handleBufferRecovery() {
   if (isRecovering) return;
@@ -1977,21 +2002,6 @@ async function handleBufferRecovery() {
         await new Promise((resolve) => {
           video.addEventListener('canplaythrough', resolve, { once: true });
         });
-        
-        // Attempt playback with 3 retries
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            await video.play();
-            console.log(`Buffer recovery succeeded using ${fastestProvider}`);
-            break;
-          } catch (error) {
-            if (attempt === 2) {
-              console.log('Final recovery attempt failed, switching video');
-              loadNextVideo();
-            }
-          }
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
       }
     });
   } finally {

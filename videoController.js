@@ -4,7 +4,7 @@
  */
 
 import { PriorityQueue } from './utils/PriorityQueue.js';
-import { getProviderUrl } from './config/videoConfig.js';
+import { getProviderUrl } from './config/providers.js';
 
 class VideoController {
   constructor(videoElement, providers) {
@@ -19,7 +19,7 @@ class VideoController {
       corsErrors: 0
     }]));
     // Chunk streaming properties
-    this.chunkSize = 2 * 1024 * 1024; // Reduced to 2MB for faster initial load
+    this.chunkSize = 1 * 1024 * 1024; // 1MB chunks
     this.initialConcurrentFetches = 2; // Only fetch first 2 chunks initially
     this.concurrentFetches = providers.length;
     this.currentProviderIndex = 0;
@@ -41,12 +41,15 @@ class VideoController {
     this.PRIORITY = {
       CRITICAL: 0, // First chunk and recovery chunks
       HIGH: 1,     // Subsequent initial chunks
-      NORMAL: 2    // Background prefetch
+      NORMAL: 2,    // Background prefetch
+      PRELOAD: 3    // Preload priority
     };
+    this.activePreloads = new Map();
   }
 
   // Chunk streaming methods
-  async fetchChunk(cid, chunkIndex) {
+  async fetchChunk(cid, chunkIndex, options = {}) {
+    const { signal, priority = this.PRIORITY.NORMAL } = options;
     const sortedProviders = this.getSortedProviders();
     const start = chunkIndex * this.chunkSize;
     const end = start + this.chunkSize - 1;
@@ -56,7 +59,7 @@ class VideoController {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       for (const provider of sortedProviders) {
         try {
-          return await this.tryProviderForChunk(provider, cid, start, end);
+          return await this.tryProviderForChunk(provider, cid, start, end, signal);
         } catch (error) {
           if (attempt === maxRetries - 1) {
             throw error;
@@ -67,7 +70,7 @@ class VideoController {
     }
   }
 
-  async tryProviderForChunk(provider, cid, start, end) {
+  async tryProviderForChunk(provider, cid, start, end, signal) {
     const startTime = performance.now();
     try {
       const response = await fetch(getProviderUrl(provider.key, cid), {
@@ -77,7 +80,8 @@ class VideoController {
           'Accept': 'video/*',
           'X-Requested-With': 'XMLHttpRequest'
         },
-        referrerPolicy: 'strict-origin-when-cross-origin'
+        referrerPolicy: 'strict-origin-when-cross-origin',
+        signal: signal
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -85,26 +89,40 @@ class VideoController {
       const buffer = await response.arrayBuffer();
       const fetchTime = performance.now() - startTime;
       
-      this.updateProviderStats(provider, fetchTime);
+      // Update provider stats with performance data
+      this.updateProviderStats(provider, {
+        success: true,
+        speed: this.chunkSize / (fetchTime / 1000), // bytes/sec
+        latency: fetchTime
+      });
+      
       return {
         chunkIndex: Math.floor(start / this.chunkSize),
         data: new Uint8Array(buffer),
         provider: provider.name
       };
     } catch (error) {
-      this.updateProviderStats(provider, null, error);
+      this.updateProviderStats(provider, {
+        success: false,
+        errorType: error.name
+      });
       throw error;
     }
   }
 
-  updateProviderStats(provider, fetchTime, error = null) {
+  updateProviderStats(provider, { success, speed, latency, errorType }) {
     const stats = this.providerStats.get(provider);
-    if (error?.message.includes('CORS')) {
-      stats.corsErrors = (stats.corsErrors || 0) + 1;
+    if (success) {
+      stats.successCount++;
+      stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + speed) / stats.successCount;
+      stats.avgLatency = (stats.avgLatency * (stats.successCount - 1) + latency) / stats.successCount;
+    } else {
+      stats.errorCount++;
+      stats.lastError = {
+        type: errorType,
+        timestamp: Date.now()
+      };
     }
-    stats.successCount++;
-    stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + 
-      (this.chunkSize / (fetchTime / 1000))) / stats.successCount;
     stats.lastUsed = Date.now();
   }
 
@@ -160,7 +178,7 @@ class VideoController {
   queueChunkFetch(cid, chunkIndex, priority = this.PRIORITY.NORMAL) {
     if (this.activeFetches.has(chunkIndex)) return;
     
-    const fetchPromise = this.fetchChunk(cid, chunkIndex)
+    const fetchPromise = this.fetchChunk(cid, chunkIndex, { priority })
       .then(result => {
         this.activeFetches.delete(chunkIndex);
         this.chunkQueue.enqueue({ ...result, priority });
@@ -364,6 +382,50 @@ class VideoController {
       this.isLoading = false;
       if (this.onSpinnerUpdate) this.onSpinnerUpdate();
     }
+  }
+
+  async preloadVideo(cid, url) {
+    if (this.activePreloads.has(cid)) return;
+
+    const abortController = new AbortController();
+    this.activePreloads.set(cid, abortController);
+
+    try {
+      // Only fetch first chunk to verify availability
+      const chunk = await this.fetchChunk(cid, 0, {
+        signal: abortController.signal,
+        priority: this.PRIORITY.PRELOAD
+      });
+
+      // Store successful provider in sessionStorage
+      const successData = {
+        provider: chunk.provider,
+        timestamp: Date.now(),
+        cid: cid
+      };
+      
+      // Keep only last 50 successful preloads
+      const preloadHistory = JSON.parse(sessionStorage.getItem('preloadHistory') || '[]');
+      preloadHistory.unshift(successData);
+      sessionStorage.setItem('preloadHistory', JSON.stringify(preloadHistory.slice(0, 50)));
+      
+    } catch (error) {
+      console.warn(`Preload failed for ${cid}:`, error);
+    } finally {
+      this.activePreloads.delete(cid);
+    }
+  }
+
+  warmupConnection(url) {
+    // Reuse existing connection pool
+    const parser = document.createElement('a');
+    parser.href = url;
+    
+    fetch(parser.href, {
+      mode: 'no-cors',
+      referrerPolicy: 'strict-origin',
+      priority: 'low'
+    }).catch(() => {}); // Intentional no-op - just warming connection
   }
 }
 
