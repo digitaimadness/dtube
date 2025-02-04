@@ -4,8 +4,8 @@ const providerDisplayNames = {
   'ipfs.io': 'IPFS Gateway',
   'algonode.xyz': 'Algonode',
   'eth.aragon.network': 'Aragon',
-  'dweb.link': 'IPFS',
-  'flk-ipfs.xyz': 'Fleek'
+  'dweb.link': 'DWeb Link',
+  'flk-ipfs.xyz': 'Fleek IPFS'
 };
 const VIDEO_CACHE_KEY = 'videoCache';
 const providerIndices = new Map(); // Tracks current provider index per CID
@@ -92,6 +92,12 @@ function shuffleArray(array) {
  * Constructs the URL to access the video through a given provider.
  */
 const getProviderUrl = (provider, cid) => {
+  // Validate provider format
+  if (!/^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/.test(provider)) {
+    console.error('Invalid provider name:', provider);
+    throw new Error(`Invalid provider specified: ${provider}`);
+  }
+
   // Handle special case for ipfs.io
   if (provider === 'ipfs.io') {
     return `https://ipfs.io/ipfs/${cid}`;
@@ -102,7 +108,7 @@ const getProviderUrl = (provider, cid) => {
 };
 
 /* Insert new helper function testProvider before loadVideoFromCid */
-async function testProvider(url) {
+async function testProvider(url, signal) {
   return new Promise((resolve, reject) => {
     const testVideo = document.createElement('video');
     testVideo.style.display = 'none';
@@ -168,29 +174,52 @@ async function testProvider(url) {
 
     testVideo.src = url;
     document.body.appendChild(testVideo);
+
+    // Add abort handling
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        if (!resolved) {
+          cleanup();
+          reject(new Error('Validation aborted'));
+        }
+      });
+    }
   });
 }
 
 // Modified validateCidThroughProviders
 async function validateCidThroughProviders(cid) {
-  const ipfsProviders = shuffleArray(PROVIDERS.filter(p => providerDisplayNames[p].includes('IPFS')));
-  const otherProviders = shuffleArray(PROVIDERS.filter(p => !providerDisplayNames[p].includes('IPFS')));
-  const allProviders = [...ipfsProviders, ...otherProviders];
-
-  const providerPromises = allProviders.map(provider => {
+  const shuffledProviders = shuffleArray([...PROVIDERS]); // Copy array before shuffling
+  
+  // Add provider cycling with timeout
+  const providerPromises = shuffledProviders.map((provider, index) => {
     const url = getProviderUrl(provider, cid);
-    return testProvider(url)
-      .then(async () => {
-        // Additional metadata check
-        const metadata = await fetchCidMetadata(url);
-        if (!metadata.contentType?.startsWith('video/')) {
-          throw new Error('Invalid content type');
-        }
-        return url;
-      });
+    const timeout = 5000 + (index * 1000); // Staggered timeouts
+    
+    return new Promise(async (resolve, reject) => {
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        abortController.abort();
+        reject(new Error(`Timeout after ${timeout}ms`));
+      }, timeout);
+
+      try {
+        await testProvider(url, abortController.signal);
+        clearTimeout(timeoutId);
+        resolve(url);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
   });
 
-  return await Promise.any(providerPromises);
+  try {
+    return await Promise.any(providerPromises);
+  } catch (error) {
+    console.error(`All providers failed for CID ${cid}:`, error);
+    throw new CidValidationError(cid);
+  }
 }
 
 /* Modified loadVideoFromCid with metadata validation */
@@ -221,7 +250,7 @@ async function loadVideoFromCid(cid) {
     }
 
     // Update cache with working provider
-    const provider = new URL(url).hostname.split('.').slice(-2)[0];
+    const provider = new URL(url).hostname.split('.').slice(-2).join('.');
     validCids[cid] = {
       expires: Date.now() + CID_VALIDITY_DURATION,
       lastWorkingProvider: provider
@@ -232,10 +261,18 @@ async function loadVideoFromCid(cid) {
   } catch (error) {
     console.error(`CID validation failed for ${cid}:`, error);
     
-    // Remove invalid CID from cache
-    delete validCids[cid];
-    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
+    // Add temporary failure tracking
+    const validCids = JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY) || '{}');
+    validCids[cid] = validCids[cid] || { failures: 0 };
+    validCids[cid].failures++;
     
+    // Only remove after 3 consecutive failures
+    if (validCids[cid].failures >= 3) {
+      delete validCids[cid];
+      console.log(`Permanently removed invalid CID: ${cid}`);
+    }
+    
+    localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
     throw new CidValidationError(cid);
   }
 }
@@ -1277,9 +1314,11 @@ class UIController {
           // Reset provider index for this CID
           providerIndices.set(currentCid, 0);
 
-          // Get new URL from different provider
-          const newUrl = generateProviderUrl(currentCid, 
-            JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
+          // Get fastest available provider from VideoController
+          const fastestProvider = videoController.getSortedProviders()[0].name;
+          const newUrl = getProviderUrl(
+            fastestProvider,
+            currentCid
           );
           
           // Preserve playback state
@@ -1295,6 +1334,7 @@ class UIController {
           for (let attempt = 0; attempt < 3; attempt++) {
             try {
               await video.play();
+              console.log(`Buffer recovery succeeded using ${fastestProvider}`);
               break;
             } catch (error) {
               if (attempt === 2) {
@@ -1643,7 +1683,7 @@ async function playAudio() {
 
   try {
     await video.play();
-    if (!isLoading) { // Only update if not loading
+    if (!isLoading) {
       updateDisplay();
     }
   } catch (error) {
@@ -1762,9 +1802,11 @@ function handleBufferRecovery() {
         // Reset provider index for this CID
         providerIndices.set(currentCid, 0);
 
-        // Get new URL from different provider
-        const newUrl = generateProviderUrl(currentCid, 
-          JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY))?.[currentCid]?.lastWorkingProvider
+        // Get fastest available provider from VideoController
+        const fastestProvider = videoController.getSortedProviders()[0].name;
+        const newUrl = getProviderUrl(
+          fastestProvider,
+          currentCid
         );
         
         // Preserve playback state
@@ -1780,6 +1822,7 @@ function handleBufferRecovery() {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             await video.play();
+            console.log(`Buffer recovery succeeded using ${fastestProvider}`);
             break;
           } catch (error) {
             if (attempt === 2) {
@@ -1829,40 +1872,29 @@ fetch('./videoSources.json')
 // Add this near other helper functions
 async function fetchCidMetadata(url) {
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), 3000);
+  const timeout = 5000; // Increased timeout to 5 seconds
 
   try {
-    // First try HEAD request
-    const headResponse = await fetch(url, {
-      method: 'HEAD',
-      signal: abortController.signal
+    // Try GET request with range first
+    const response = await fetch(url, {
+      headers: { Range: 'bytes=0-0' },
+      signal: abortController.signal,
+      referrerPolicy: 'no-referrer'
     });
 
-    if (!headResponse.ok) {
-      // If HEAD not allowed, try GET with range
-      if (headResponse.status === 405) {
-        const rangeResponse = await fetch(url, {
-          headers: { Range: 'bytes=0-0' },
-          signal: abortController.signal
-        });
-        if (!rangeResponse.ok && rangeResponse.status !== 206) {
-          throw new Error(`Invalid response: ${rangeResponse.status}`);
-        }
-        return {
-          contentType: rangeResponse.headers.get('Content-Type'),
-          valid: rangeResponse.headers.get('Content-Length') > 0
-        };
-      }
-      throw new Error(`HEAD failed: ${headResponse.status}`);
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`Invalid response: ${response.status}`);
     }
 
     return {
-      contentType: headResponse.headers.get('Content-Type'),
-      valid: headResponse.ok && 
-             parseInt(headResponse.headers.get('Content-Length')) > 0
+      contentType: response.headers.get('Content-Type'),
+      valid: response.headers.get('Content-Range') !== null
     };
+  } catch (error) {
+    console.error('Metadata fetch error:', error);
+    throw new Error(`Content verification failed: ${error.message}`);
   } finally {
-    clearTimeout(timeoutId);
+    abortController.abort();
   }
 }
 

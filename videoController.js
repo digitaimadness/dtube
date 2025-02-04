@@ -88,11 +88,11 @@ class VideoController {
       const statsA = this.providerStats.get(a);
       const statsB = this.providerStats.get(b);
       
-      // Prioritize providers with higher success rate and speed
+      // Calculate weighted score (70% speed, 30% success rate)
       const scoreA = (statsA.avgSpeed * 0.7) + (statsA.successCount * 0.3);
       const scoreB = (statsB.avgSpeed * 0.7) + (statsB.successCount * 0.3);
       
-      return scoreB - scoreA;
+      return scoreB - scoreA; // Descending order
     });
   }
 
