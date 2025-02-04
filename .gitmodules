@@ -1,0 +1,3 @@
+[submodule "dtube-staging"]
+	path = dtube-staging
+	url = https://github.com/daoch4n/dtube-staging.git
