@@ -34,11 +34,8 @@ let isRecovering = false; // Add to top with other globals
 // Add these constants with other global constants
 const CONTROLS_TIMEOUT = 3000; // 3 seconds of inactivity
 
-// Import video sources
-import videoSourcesImport from './videoSources.js';
-
-// Replace the original import and redeclaration
-const videoSources = shuffleArray(videoSourcesImport);
+// Replace the JSON import with fetch
+let videoSources = [];
 
 // Add global declaration at the top with other globals
 let controlsSystem;  // Add this line with other global variables
@@ -136,7 +133,21 @@ async function testProvider(url) {
       }
     };
 
-    testVideo.addEventListener('loadeddata', verifyPlayable, { once: true });
+    const verifyContentType = async () => {
+      try {
+        const metadata = await fetchCidMetadata(url);
+        if (!metadata.contentType?.startsWith('video/')) {
+          throw new Error('Invalid content type');
+        }
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    testVideo.addEventListener('loadeddata', async () => {
+      await verifyContentType();
+      await verifyPlayable();
+    }, { once: true });
     testVideo.addEventListener('error', () => {
       if (!resolved) {
         resolved = true;
@@ -150,34 +161,55 @@ async function testProvider(url) {
   });
 }
 
-// Add this function above loadVideoFromCid
+// Modified validateCidThroughProviders
 async function validateCidThroughProviders(cid) {
-  // Split providers into IPFS and non-IPFS groups
   const ipfsProviders = shuffleArray(PROVIDERS.filter(p => providerDisplayNames[p].includes('IPFS')));
   const otherProviders = shuffleArray(PROVIDERS.filter(p => !providerDisplayNames[p].includes('IPFS')));
   const allProviders = [...ipfsProviders, ...otherProviders];
 
-  // Create test promises for all providers
   const providerPromises = allProviders.map(provider => {
     const url = getProviderUrl(provider, cid);
-    return testProvider(url).then(() => url);
+    return testProvider(url)
+      .then(async () => {
+        // Additional metadata check
+        const metadata = await fetchCidMetadata(url);
+        if (!metadata.contentType?.startsWith('video/')) {
+          throw new Error('Invalid content type');
+        }
+        return url;
+      });
   });
 
   return await Promise.any(providerPromises);
 }
 
-/* Optimized loadVideoFromCid using testProvider and Promise.any */
+/* Modified loadVideoFromCid with metadata validation */
 async function loadVideoFromCid(cid) {
   // Check cached validity first
   const validCids = JSON.parse(localStorage.getItem(CID_VALID_CACHE_KEY) || '{}');
+  
   if (validCids[cid] && Date.now() < validCids[cid].expires) {
-    console.log(`Using validated CID from cache: ${cid}`);
-    return generateProviderUrl(cid, validCids[cid].lastWorkingProvider);
+    try {
+      const cachedUrl = generateProviderUrl(cid, validCids[cid].lastWorkingProvider);
+      const metadata = await fetchCidMetadata(cachedUrl);
+      
+      if (metadata.valid && metadata.contentType?.startsWith('video/')) {
+        console.log(`Using validated CID from cache: ${cid}`);
+        return cachedUrl;
+      }
+    } catch (error) {
+      console.log(`Cached provider failed validation, revalidating CID: ${cid}`);
+    }
   }
 
   try {
     const url = await validateCidThroughProviders(cid);
+    const metadata = await fetchCidMetadata(url);
     
+    if (!metadata.contentType?.startsWith('video/')) {
+      throw new Error(`Invalid content type: ${metadata.contentType}`);
+    }
+
     // Update cache with working provider
     const provider = new URL(url).hostname.split('.').slice(-2)[0];
     validCids[cid] = {
@@ -1762,3 +1794,57 @@ video.addEventListener("waiting", () => {
     }, 1000);
   }
 });
+
+// Add this near the top with other initializations
+fetch('./videoSources.json')
+  .then(response => response.json())
+  .then(data => {
+    videoSources = shuffleArray(data);
+    if (videoSources.length > 0) {
+      loadNextVideo(); // Start loading after sources are available
+    }
+  })
+  .catch(error => {
+    console.error('Error loading video sources:', error);
+    showNotification("Failed to load video sources", 'error');
+  });
+
+// Add this near other helper functions
+async function fetchCidMetadata(url) {
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), 3000);
+
+  try {
+    // First try HEAD request
+    const headResponse = await fetch(url, {
+      method: 'HEAD',
+      signal: abortController.signal
+    });
+
+    if (!headResponse.ok) {
+      // If HEAD not allowed, try GET with range
+      if (headResponse.status === 405) {
+        const rangeResponse = await fetch(url, {
+          headers: { Range: 'bytes=0-0' },
+          signal: abortController.signal
+        });
+        if (!rangeResponse.ok && rangeResponse.status !== 206) {
+          throw new Error(`Invalid response: ${rangeResponse.status}`);
+        }
+        return {
+          contentType: rangeResponse.headers.get('Content-Type'),
+          valid: rangeResponse.headers.get('Content-Length') > 0
+        };
+      }
+      throw new Error(`HEAD failed: ${headResponse.status}`);
+    }
+
+    return {
+      contentType: headResponse.headers.get('Content-Type'),
+      valid: headResponse.ok && 
+             parseInt(headResponse.headers.get('Content-Length')) > 0
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
