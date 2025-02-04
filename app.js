@@ -1310,22 +1310,18 @@ class UIController {
   }
 
   updateSpinner() {
-    // Use instance property for loading and internal state for buffering
-    const loading = this.isLoading;
-    const buffering = this.state.isBuffering;
-    // Only show the spinner when video is ready enough (readyState>=2 ensures data is available)
-    const shouldShowSpinner = (loading || buffering) && (this.video.readyState >= 2);
+    if (isLoading) {
+      this.controls.spinner.style.display = 'block';
+      this.controls.spinner.style.animation = 'spin 1s linear infinite';
+    } else {
+      this.controls.spinner.style.display = 'none';
+      this.controls.spinner.style.animation = '';
+    }
     
-    this.controls.spinner.style.display = shouldShowSpinner ? "block" : "none";
-    
-    if (shouldShowSpinner) {
-      // Only compute hue if video is ready; otherwise, fall back to a default hue
-      if (this.video.readyState >= 2) {
-        const currentHue = this.frameAnalyzer.getDominantHue(this.video);
-        this.controls.spinner.style.borderTopColor = `hsl(${currentHue}, 70%, 50%)`;
-      } else {
-        this.controls.spinner.style.borderTopColor = 'hsl(0, 70%, 50%)';
-      }
+    // Add error boundary check
+    if (!this.controls.spinner) {
+      console.error('Spinner element not found');
+      this.controls.spinner = document.getElementById('spinner');
     }
   }
 
