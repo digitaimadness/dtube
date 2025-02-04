@@ -1,5 +1,4 @@
 // --- Global Constants and Variables --- //
-const PROVIDERS = ['ipfs.io', 'algonode.xyz', 'eth.aragon.network', 'dweb.link', 'flk-ipfs.xyz'];
 const providerDisplayNames = {
   'ipfs.io': 'IPFS Gateway',
   'algonode.xyz': 'Algonode',
@@ -52,9 +51,13 @@ const LOAD_TIMEOUT = 2000; // 2 seconds
 import VideoController from './videoController.js';
 
 // Add after video element initialization (~line 13)
-const providers = PROVIDERS.map(name => ({ 
-  name: providerDisplayNames[name],
-  fetch: (cid, start, end) => fetch(getProviderUrl(name, cid), { headers: { Range: `bytes=${start}-${end}` }})
+const providers = Object.keys(providerDisplayNames).map(providerKey => ({
+  key: providerKey,
+  name: providerDisplayNames[providerKey],
+  fetch: (cid, start, end) => fetch(getProviderUrl(providerKey, cid), { 
+    headers: { Range: `bytes=${start}-${end}` },
+    mode: providerKey === 'flk-ipfs.xyz' ? 'no-cors' : 'cors'
+  })
 }));
 
 // Initialize VideoController (~line 44)
@@ -92,19 +95,15 @@ function shuffleArray(array) {
  * Constructs the URL to access the video through a given provider.
  */
 const getProviderUrl = (provider, cid) => {
-  // Validate provider format
+  // First validate provider name format
   if (!/^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/.test(provider)) {
-    console.error('Invalid provider name:', provider);
-    throw new Error(`Invalid provider specified: ${provider}`);
+    throw new Error(`Invalid provider: ${provider}`);
   }
 
-  // Handle special case for ipfs.io
-  if (provider === 'ipfs.io') {
-    return `https://ipfs.io/ipfs/${cid}`;
-  }
+  // Use subdomain format for providers that support it
   return ["dweb.link", "flk-ipfs.xyz"].includes(provider)
     ? `https://${cid}.ipfs.${provider}`
-    : `https://ipfs.${provider}/ipfs/${cid}`;
+    : `https://${provider}/ipfs/${cid}`;
 };
 
 /* Insert new helper function testProvider before loadVideoFromCid */
@@ -184,13 +183,40 @@ async function testProvider(url, signal) {
         }
       });
     }
+
+    // Add ORB-specific error handling
+    const handleError = (error) => {
+      if (error.message.includes('Failed to load') && url.includes('flk-ipfs.xyz')) {
+        console.warn('ORB blocked response from flk-ipfs.xyz');
+        reject(new Error('ORB blocked response'));
+      } else {
+        reject(error);
+      }
+    };
+
+    testVideo.addEventListener('error', () => {
+      if (!resolved) {
+        cleanup();
+        handleError(new Error('Error loading video'));
+      }
+    }, { once: true });
   });
 }
 
 // Modified validateCidThroughProviders
 async function validateCidThroughProviders(cid) {
-  const shuffledProviders = shuffleArray([...PROVIDERS]); // Copy array before shuffling
+  const providerKeys = Object.keys(providerDisplayNames);
+  const shuffledProviders = shuffleArray([...providerKeys]);
   
+  // Prefetch DNS for all providers
+  shuffledProviders.forEach(provider => {
+    const url = new URL(getProviderUrl(provider, cid));
+    const dnsPrefetch = document.createElement('link');
+    dnsPrefetch.rel = 'dns-prefetch';
+    dnsPrefetch.href = `//${url.hostname}`;
+    document.head.appendChild(dnsPrefetch);
+  });
+
   // Add provider cycling with timeout
   const providerPromises = shuffledProviders.map((provider, index) => {
     const url = getProviderUrl(provider, cid);
@@ -209,7 +235,13 @@ async function validateCidThroughProviders(cid) {
         resolve(url);
       } catch (error) {
         clearTimeout(timeoutId);
-        reject(error);
+        // Handle DNS resolution errors specifically
+        if (error.message.includes('ERR_NAME_NOT_RESOLVED')) {
+          console.warn(`DNS failure for ${provider}`, error);
+          reject(new Error('DNS resolution failed'));
+        } else {
+          reject(error);
+        }
       }
     });
   });
@@ -250,10 +282,15 @@ async function loadVideoFromCid(cid) {
     }
 
     // Update cache with working provider
-    const provider = new URL(url).hostname.split('.').slice(-2).join('.');
+    const urlObj = new URL(url);
+    const isSubdomainFormat = urlObj.hostname.includes('.ipfs.');
+    const providerKey = isSubdomainFormat 
+      ? urlObj.hostname.split('.').slice(-2).join('.')
+      : urlObj.hostname;
+
     validCids[cid] = {
       expires: Date.now() + CID_VALIDITY_DURATION,
-      lastWorkingProvider: provider
+      lastWorkingProvider: providerKey
     };
     localStorage.setItem(CID_VALID_CACHE_KEY, JSON.stringify(validCids));
     
@@ -279,7 +316,7 @@ async function loadVideoFromCid(cid) {
 
 // Add this helper function
 function generateProviderUrl(cid, preferredProvider) {
-  const providerOrder = [...PROVIDERS];
+  const providerOrder = [...Object.keys(providerDisplayNames)];
   if (preferredProvider) {
     providerOrder.unshift(...providerOrder.splice(providerOrder.indexOf(preferredProvider), 1));
   }
@@ -373,7 +410,12 @@ async function loadNextVideo(retries = 0) {
     } catch (error) {
       if (error.name !== 'AbortError') {
         console.error('Autoplay blocked', error);
-        controlsSystem.showNotification("Click to unmute", 'warning');
+        // Show specific notification for unmute failure
+        if (error.name === 'NotAllowedError') {
+          controlsSystem.showNotification("Click anywhere to unmute audio", 'warning');
+        } else {
+          controlsSystem.showNotification("Playback blocked - click to start", 'warning');
+        }
       }
     }
   } catch (error) {
@@ -1315,7 +1357,7 @@ class UIController {
           providerIndices.set(currentCid, 0);
 
           // Get fastest available provider from VideoController
-          const fastestProvider = videoController.getSortedProviders()[0].name;
+          const fastestProvider = videoController.getSortedProviders()[0].key;
           const newUrl = getProviderUrl(
             fastestProvider,
             currentCid
@@ -1477,10 +1519,29 @@ async function main() {
     requestAnimationFrame(updateProgress);
   });
 
-  if (videoSources.length > 0) {
-    await loadNextVideo();
-  } else {
-    console.error("No video sources available");
+  try {
+    // Move video source loading into main execution flow
+    const response = await fetch('./videoSources.json');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
+    videoSources = shuffleArray(await response.json());
+    
+    if (videoSources.length > 0) {
+      await loadNextVideo();
+    } else {
+      console.error("Video sources array is empty");
+      controlsSystem.showNotification("No videos available", 'error');
+    }
+  } catch (error) {
+    console.error("Initialization failed:", error);
+    controlsSystem.showNotification("Failed to load content", 'error');
+    
+    // Add fallback to hardcoded sources
+    const fallbackSources = await import('./config/fallbackSources.js');
+    if (fallbackSources?.length > 0) {
+      videoSources = shuffleArray(fallbackSources);
+      await loadNextVideo();
+    }
   }
 }
 
@@ -1774,8 +1835,108 @@ function handleArrowKey(direction) {
   }
 }
 
-// Add this function near other video control functions (~line 1300)
-function handleBufferRecovery() {
+// Update the waiting event listener to use the new function
+video.addEventListener("waiting", () => {
+  if (!bufferingUpdateScheduled && !isSeeking) {
+    bufferingUpdateScheduled = true;
+    setTimeout(() => {
+      if (video.readyState < 4 && !isRecovering && !isSeeking) {
+        isRecovering = true;
+        console.log('Attempting buffer recovery...');
+        handleBufferRecovery(); // Now calls the global function
+      }
+      bufferingUpdateScheduled = false;
+    }, 1000);
+  }
+});
+
+// Add this near the top with other initializations
+fetch('./videoSources.json')
+  .then(response => response.json())
+  .then(data => {
+    videoSources = shuffleArray(data);
+    if (videoSources.length > 0) {
+      loadNextVideo(); // Start loading after sources are available
+    }
+  })
+  .catch(error => {
+    console.error('Error loading video sources:', error);
+    showNotification("Failed to load video sources", 'error');
+  });
+
+// Add this near other helper functions
+async function fetchCidMetadata(url) {
+  const abortController = new AbortController();
+  
+  try {
+    // Try CORS-first approach
+    const headResponse = await fetch(url, {
+      method: 'HEAD',
+      mode: 'cors',
+      headers: { 'Range': 'bytes=0-0' },
+      signal: abortController.signal
+    });
+
+    if (headResponse.type === 'opaque') {
+      throw new Error('Opaque response detected');
+    }
+
+    return {
+      contentType: headResponse.headers.get('Content-Type'),
+      valid: headResponse.headers.get('Content-Range') !== null
+    };
+  } catch (error) {
+    // Fallback to no-cors for flk-ipfs
+    if (url.includes('flk-ipfs.xyz')) {
+      const getResponse = await fetch(url, {
+        method: 'GET',
+        mode: 'no-cors',
+        headers: { 'Range': 'bytes=0-0' },
+        signal: abortController.signal
+      });
+
+      return {
+        contentType: 'video/*', // Assume video content if we can't verify
+        valid: getResponse.ok
+      };
+    }
+    throw error;
+  } finally {
+    abortController.abort();
+  }
+}
+
+// Add PriorityQueue implementation
+class PriorityQueue {
+  constructor(comparator = (a, b) => a - b) {
+    this.heap = [];
+    this.comparator = comparator;
+  }
+
+  enqueue(value) {
+    this.heap.push(value);
+    this.bubbleUp();
+  }
+
+  dequeue() {
+    const root = this.heap[0];
+    const last = this.heap.pop();
+    if (this.heap.length > 0) {
+      this.heap[0] = last;
+      this.sinkDown();
+    }
+    return root;
+  }
+
+  size() {
+    return this.heap.length;
+  }
+
+  // ... heap helper methods ...
+}
+
+// Update the handleBufferRecovery function to be async
+async function handleBufferRecovery() {
   if (isRecovering) return;
   isRecovering = true;
   
@@ -1785,7 +1946,7 @@ function handleBufferRecovery() {
   const recoveryAbortController = new AbortController();
   
   try {
-    Promise.race([
+    await Promise.race([
       new Promise(resolve => {
         video.addEventListener('playing', resolve, { once: true });
         video.addEventListener('error', resolve, { once: true });
@@ -1803,7 +1964,7 @@ function handleBufferRecovery() {
         providerIndices.set(currentCid, 0);
 
         // Get fastest available provider from VideoController
-        const fastestProvider = videoController.getSortedProviders()[0].name;
+        const fastestProvider = videoController.getSortedProviders()[0].key;
         const newUrl = getProviderUrl(
           fastestProvider,
           currentCid
@@ -1838,91 +1999,4 @@ function handleBufferRecovery() {
     isRecovering = false;
     recoveryAbortController.abort();
   }
-}
-
-// Update the waiting event listener to use the new function
-video.addEventListener("waiting", () => {
-  if (!bufferingUpdateScheduled && !isSeeking) {
-    bufferingUpdateScheduled = true;
-    setTimeout(() => {
-      if (video.readyState < 4 && !isRecovering && !isSeeking) {
-        isRecovering = true;
-        console.log('Attempting buffer recovery...');
-        handleBufferRecovery(); // Now calls the global function
-      }
-      bufferingUpdateScheduled = false;
-    }, 1000);
-  }
-});
-
-// Add this near the top with other initializations
-fetch('./videoSources.json')
-  .then(response => response.json())
-  .then(data => {
-    videoSources = shuffleArray(data);
-    if (videoSources.length > 0) {
-      loadNextVideo(); // Start loading after sources are available
-    }
-  })
-  .catch(error => {
-    console.error('Error loading video sources:', error);
-    showNotification("Failed to load video sources", 'error');
-  });
-
-// Add this near other helper functions
-async function fetchCidMetadata(url) {
-  const abortController = new AbortController();
-  const timeout = 5000; // Increased timeout to 5 seconds
-
-  try {
-    // Try GET request with range first
-    const response = await fetch(url, {
-      headers: { Range: 'bytes=0-0' },
-      signal: abortController.signal,
-      referrerPolicy: 'no-referrer'
-    });
-
-    if (!response.ok && response.status !== 206) {
-      throw new Error(`Invalid response: ${response.status}`);
-    }
-
-    return {
-      contentType: response.headers.get('Content-Type'),
-      valid: response.headers.get('Content-Range') !== null
-    };
-  } catch (error) {
-    console.error('Metadata fetch error:', error);
-    throw new Error(`Content verification failed: ${error.message}`);
-  } finally {
-    abortController.abort();
-  }
-}
-
-// Add PriorityQueue implementation
-class PriorityQueue {
-  constructor(comparator = (a, b) => a - b) {
-    this.heap = [];
-    this.comparator = comparator;
-  }
-
-  enqueue(value) {
-    this.heap.push(value);
-    this.bubbleUp();
-  }
-
-  dequeue() {
-    const root = this.heap[0];
-    const last = this.heap.pop();
-    if (this.heap.length > 0) {
-      this.heap[0] = last;
-      this.sinkDown();
-    }
-    return root;
-  }
-
-  size() {
-    return this.heap.length;
-  }
-
-  // ... heap helper methods ...
 }

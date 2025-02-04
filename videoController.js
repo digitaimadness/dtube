@@ -4,6 +4,7 @@
  */
 
 import { PriorityQueue } from './utils/PriorityQueue.js';
+import { getProviderUrl } from './config/videoConfig.js';
 
 class VideoController {
   constructor(videoElement, providers) {
@@ -14,7 +15,8 @@ class VideoController {
       successCount: 0,
       errorCount: 0,
       avgSpeed: 0,
-      lastUsed: 0
+      lastUsed: 0,
+      corsErrors: 0
     }]));
     // Chunk streaming properties
     this.chunkSize = 2 * 1024 * 1024; // Reduced to 2MB for faster initial load
@@ -49,36 +51,57 @@ class VideoController {
     const start = chunkIndex * this.chunkSize;
     const end = start + this.chunkSize - 1;
 
-    // Race providers with timeout
-    return Promise.race([
-      Promise.any(sortedProviders.map(provider => 
-        this.tryProviderForChunk(provider, cid, start, end)
-      )),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Chunk fetch timeout')), 3000)
-      )
-    ]);
+    // Retry with exponential backoff
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      for (const provider of sortedProviders) {
+        try {
+          return await this.tryProviderForChunk(provider, cid, start, end);
+        } catch (error) {
+          if (attempt === maxRetries - 1) {
+            throw error;
+          }
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
   }
 
   async tryProviderForChunk(provider, cid, start, end) {
     const startTime = performance.now();
-    const response = await provider.fetch(cid, start, end);
-    
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    
-    const buffer = await response.arrayBuffer();
-    const fetchTime = performance.now() - startTime;
-    
-    this.updateProviderStats(provider, fetchTime);
-    return {
-      chunkIndex: Math.floor(start / this.chunkSize),
-      data: new Uint8Array(buffer),
-      provider: provider.name
-    };
+    try {
+      const response = await fetch(getProviderUrl(provider.key, cid), {
+        mode: 'cors',
+        headers: { 
+          'Range': `bytes=${start}-${end}`,
+          'Accept': 'video/*',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        referrerPolicy: 'strict-origin-when-cross-origin'
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const buffer = await response.arrayBuffer();
+      const fetchTime = performance.now() - startTime;
+      
+      this.updateProviderStats(provider, fetchTime);
+      return {
+        chunkIndex: Math.floor(start / this.chunkSize),
+        data: new Uint8Array(buffer),
+        provider: provider.name
+      };
+    } catch (error) {
+      this.updateProviderStats(provider, null, error);
+      throw error;
+    }
   }
 
-  updateProviderStats(provider, fetchTime) {
+  updateProviderStats(provider, fetchTime, error = null) {
     const stats = this.providerStats.get(provider);
+    if (error?.message.includes('CORS')) {
+      stats.corsErrors = (stats.corsErrors || 0) + 1;
+    }
     stats.successCount++;
     stats.avgSpeed = (stats.avgSpeed * (stats.successCount - 1) + 
       (this.chunkSize / (fetchTime / 1000))) / stats.successCount;
