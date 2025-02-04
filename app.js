@@ -1,11 +1,4 @@
 // --- Global Constants and Variables --- //
-const providerDisplayNames = {
-  'ipfs.io': 'IPFS Gateway',
-  'algonode.xyz': 'Algonode',
-  'eth.aragon.network': 'Aragon',
-  'dweb.link': 'DWeb Link',
-  'flk-ipfs.xyz': 'Fleek IPFS'
-};
 const VIDEO_CACHE_KEY = 'videoCache';
 const providerIndices = new Map(); // Tracks current provider index per CID
 
@@ -49,11 +42,12 @@ const LOAD_TIMEOUT = 2000; // 2 seconds
 
 // Add at the top with other imports
 import VideoController from './videoController.js';
+import { PROVIDERS, getProviderUrl } from './config/providers.js';
 
 // Add after video element initialization (~line 13)
-const providers = Object.keys(providerDisplayNames).map(providerKey => ({
+const providers = Object.keys(PROVIDERS).map(providerKey => ({
   key: providerKey,
-  name: providerDisplayNames[providerKey],
+  name: PROVIDERS[providerKey].displayName,
   fetch: (cid, start, end) => fetch(getProviderUrl(providerKey, cid), { 
     headers: { Range: `bytes=${start}-${end}` },
     mode: providerKey === 'flk-ipfs.xyz' ? 'no-cors' : 'cors'
@@ -90,21 +84,6 @@ function shuffleArray(array) {
   }
   return array;
 }
-
-/**
- * Constructs the URL to access the video through a given provider.
- */
-const getProviderUrl = (provider, cid) => {
-  // First validate provider name format
-  if (!/^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*$/.test(provider)) {
-    throw new Error(`Invalid provider: ${provider}`);
-  }
-
-  // Use subdomain format for providers that support it
-  return ["dweb.link", "flk-ipfs.xyz"].includes(provider)
-    ? `https://${cid}.ipfs.${provider}`
-    : `https://${provider}/ipfs/${cid}`;
-};
 
 /* Insert new helper function testProvider before loadVideoFromCid */
 async function testProvider(url, signal) {
@@ -167,7 +146,7 @@ async function testProvider(url, signal) {
     testVideo.addEventListener('error', () => {
       if (!resolved) {
         cleanup();
-        reject(new Error('Error loading video'));
+        handleError(new Error('Error loading video'));
       }
     }, { once: true });
 
@@ -205,12 +184,12 @@ async function testProvider(url, signal) {
 
 // Modified validateCidThroughProviders
 async function validateCidThroughProviders(cid) {
-  const providerKeys = Object.keys(providerDisplayNames);
+  const providerKeys = Object.keys(PROVIDERS);
   const shuffledProviders = shuffleArray([...providerKeys]);
   
   // Add provider availability check
-  const availableProviders = shuffledProviders.filter(provider => {
-    const stats = videoController.providerStats.get(providers.find(p => p.key === provider));
+  const availableProviders = shuffledProviders.filter(providerKey => {
+    const stats = videoController.providerStats.get(providers.find(p => p.key === providerKey));
     return (stats?.errorCount || 0) < 3;
   });
 
@@ -218,9 +197,31 @@ async function validateCidThroughProviders(cid) {
     throw new CidValidationError(cid);
   }
 
-  // Prefetch DNS for all providers
-  availableProviders.forEach(provider => {
+  // Add DNS pre-check
+  const dnsCheckPromises = availableProviders.map(async (provider) => {
     const url = new URL(getProviderUrl(provider, cid));
+    try {
+      await fetch(`https://dns.google/resolve?name=${url.hostname}`, { 
+        mode: 'cors',
+        headers: { 'Accept': 'application/dns-json' }
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  });
+
+  const dnsResults = await Promise.all(dnsCheckPromises);
+  const providersWithDNS = availableProviders.filter((_, i) => dnsResults[i]);
+  
+  if (providersWithDNS.length === 0) {
+    console.error(`All DNS checks failed for CID ${cid}`);
+    throw new CidValidationError(cid);
+  }
+
+  // Prefetch DNS for all providers
+  providersWithDNS.forEach(provider => {
+    const url = getProviderUrl(provider, cid);
     const dnsPrefetch = document.createElement('link');
     dnsPrefetch.rel = 'dns-prefetch';
     dnsPrefetch.href = `//${url.hostname}`;
@@ -228,7 +229,7 @@ async function validateCidThroughProviders(cid) {
   });
 
   // Add provider cycling with timeout
-  const providerPromises = availableProviders.map((provider, index) => {
+  const providerPromises = providersWithDNS.map((provider, index) => {
     const url = getProviderUrl(provider, cid);
     const timeout = 5000 + (index * 1000); // Staggered timeouts
     
@@ -261,7 +262,7 @@ async function validateCidThroughProviders(cid) {
   } catch (error) {
     console.error(`All providers failed for CID ${cid}:`, error);
     // Mark failed providers
-    availableProviders.forEach(provider => {
+    providersWithDNS.forEach(provider => {
       const stats = videoController.providerStats.get(providers.find(p => p.key === provider));
       stats.errorCount = (stats.errorCount || 0) + 1;
     });
@@ -331,16 +332,20 @@ async function loadVideoFromCid(cid) {
 
 // Add this helper function
 function generateProviderUrl(cid, preferredProvider) {
-  const providerOrder = [...Object.keys(providerDisplayNames)];
+  const providerOrder = [...Object.keys(PROVIDERS)].filter(p => {
+    const provider = PROVIDERS[p];
+    return !provider.template.includes('ipfs.ipfs'); // Filter out invalid templates
+  });
+  
   if (preferredProvider) {
     providerOrder.unshift(...providerOrder.splice(providerOrder.indexOf(preferredProvider), 1));
   }
   
   const providerIndex = providerIndices.get(cid) || 0;
-  const provider = providerOrder[providerIndex % providerOrder.length];
+  const providerKey = providerOrder[providerIndex % providerOrder.length];
   providerIndices.set(cid, providerIndex + 1);
   
-  return getProviderUrl(provider, cid);
+  return getProviderUrl(providerKey, cid);
 }
 
 /**
